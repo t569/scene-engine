@@ -9,7 +9,7 @@
  * Each node keeps its pure half exported and tested: `plotPath` and
  * `sliderValueAt` don't touch the DOM.
  */
-import { BaseObject, SETTLE_RATE, approach, toSceneCoords } from './objects.ts';
+import { BaseObject, SETTLE_RATE, approach, capturePointer, toSceneCoords } from './objects.ts';
 import { SVG_NS } from './scene.ts';
 import type { Compiled, Env } from './expr.ts';
 import type { BaseNodeSpec } from './types.ts';
@@ -229,7 +229,7 @@ export class SliderNode extends BaseObject {
     let dragging = false;
     const down = (e: PointerEvent) => {
       dragging = true;
-      el.setPointerCapture(e.pointerId);
+      capturePointer(el, e.pointerId);
       set(e);
     };
     const move = (e: PointerEvent) => dragging && set(e);

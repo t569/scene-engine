@@ -14,7 +14,7 @@
  * The physics (`stepForces`) and the helpers around it are pure and tested
  * without a DOM.
  */
-import { BaseObject, approach, toSceneCoords } from '../objects.ts';
+import { BaseObject, approach, capturePointer, toSceneCoords } from '../objects.ts';
 import { SVG_NS } from '../scene.ts';
 import type { BaseNodeSpec, SceneLike } from '../types.ts';
 
@@ -443,7 +443,7 @@ export class GraphNode extends BaseObject {
     const down = (e: PointerEvent) => {
       const p = toSceneCoords(svg, e.clientX, e.clientY);
       pointers.set(e.pointerId, p);
-      el.setPointerCapture(e.pointerId);
+      capturePointer(el, e.pointerId);
       if (pointers.size === 2) {
         const [a, b] = [...pointers.values()];
         pinch = { d: Math.hypot(a!.x - b!.x, a!.y - b!.y) };

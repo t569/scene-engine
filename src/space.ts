@@ -1,4 +1,4 @@
-import { BaseObject } from './objects.ts';
+import { BaseObject, capturePointer } from './objects.ts';
 import { SVG_NS } from './scene.ts';
 import type { BaseNodeSpec, CameraSpec, SceneLike, Space3DItemSpec } from './types.ts';
 
@@ -486,7 +486,7 @@ export class Space3D extends BaseObject {
 
     const down = (e: PointerEvent) => {
       last = { x: e.clientX, y: e.clientY };
-      el.setPointerCapture(e.pointerId);
+      capturePointer(el, e.pointerId);
       el.style.cursor = 'grabbing';
     };
     const move = (e: PointerEvent) => {
