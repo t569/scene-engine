@@ -276,6 +276,19 @@ export function text(spec: TextSpec, fontFamily?: string): SVGElement {
   return el;
 }
 
+/**
+ * Capture a pointer so a drag keeps its events outside the element — without
+ * throwing when the pointer is already gone (lifted mid-event, a synthetic
+ * event). A failed capture only means the drag can't leave the element.
+ */
+export function capturePointer(el: Element, pointerId: number): void {
+  try {
+    el.setPointerCapture(pointerId);
+  } catch {
+    /* no active pointer with that id: carry on uncaptured */
+  }
+}
+
 /* ----------------------------------------------------------------- presets */
 
 /**
@@ -312,7 +325,7 @@ function makeDraggable(obj: BaseObject, svg: SVGSVGElement): void {
   const down = (e: PointerEvent): void => {
     const p = toSceneCoords(svg, e.clientX, e.clientY);
     grab = { x: p.x - obj.x, y: p.y - obj.y };
-    el.setPointerCapture(e.pointerId);
+    capturePointer(el, e.pointerId);
     el.style.cursor = 'grabbing';
   };
 
@@ -376,7 +389,7 @@ function makeControl(obj: BaseObject, svg: SVGSVGElement): void {
     const p = toSceneCoords(svg, e.clientX, e.clientY);
     // Keep the grab offset, so the handle doesn't jump its centre to the pointer.
     grab = { x: p.x - obj.x, y: p.y - obj.y };
-    el.setPointerCapture(e.pointerId);
+    capturePointer(el, e.pointerId);
   };
   const up = (e: PointerEvent): void => {
     grab = null;

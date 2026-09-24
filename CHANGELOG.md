@@ -7,6 +7,9 @@
   pinch zoom, drag with reheat, hover neighbourhoods, click to open, `focus()`, `fit()`,
   `setHighlight()`. Pure physics (`stepForces`) and camera maths (`zoomAt`), tested.
 - `demo.html` gains a living graph.
+- Gentler star sizes (log, capped), `fit(padding, maxZoom)`, `labelZoom`.
+- `capturePointer`: pointer capture that doesn't throw when the pointer is already gone;
+  every drag in the engine uses it.
 
 ## 0.3.0: the interactive layer
 

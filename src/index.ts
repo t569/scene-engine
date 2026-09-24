@@ -11,6 +11,7 @@ export {
   BaseObject,
   applyPresets,
   approach,
+  capturePointer,
   circle,
   path,
   polyline,
