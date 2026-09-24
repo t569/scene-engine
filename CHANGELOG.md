@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- 3D items take `strokeOpacity` (lines fade from it with depth, default 1), and
+  surfaces take `highlightStroke` (the lit ring's own colour, default `stroke`).
+
 ## 0.2.0: the Manim layer
 
 Additive: every 0.1 spec and export behaves as before.

@@ -140,8 +140,9 @@ curve can pass behind a surface and out again. Omit `distance` for
 orthographic. `steps` sets resolution. Shapes are named, not formula strings,
 because a spec may come from a model and a formula string would be code. In
 TypeScript, `Space3D.add` takes any function (`SurfaceItem` / `CurveItem`),
-with `reveal` (a surface filling in along u), `highlight` (one bold ring) and
-`draw` (a curve drawing itself).
+with `reveal` (a surface filling in along u), `highlight` (one bold ring,
+coloured by `highlightStroke`), `draw` (a curve drawing itself) and
+`strokeOpacity` (for a figure that sits quietly beside text).
 
 ### Math
 
