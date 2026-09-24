@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>scene-engine — PoC</title>
+    <title>scene-engine — demos</title>
     <style>
       body {
         margin: 0;
@@ -14,59 +14,152 @@
         flex-direction: column;
         align-items: center;
         gap: 12px;
-        padding: 24px 16px;
+        padding: 24px 16px 64px;
       }
-      #stage {
+      h2 { margin: 28px 0 0; font-size: 16px; width: min(600px, 100%); }
+      .stage {
         width: min(600px, 100%);
         aspect-ratio: 3 / 2;
         border-radius: 12px;
         overflow: hidden;
         box-shadow: 0 1px 3px rgb(0 0 0 / 0.15);
+        background: #fff;
       }
-      p {
-        margin: 0;
-        max-width: 600px;
-        color: #555;
-      }
-      code {
-        background: #e8e8e8;
-        border-radius: 3px;
-        padding: 1px 4px;
-      }
+      .stage.banner { aspect-ratio: 3 / 1; }
+      p { margin: 0; max-width: 600px; width: 100%; color: #555; }
+      code { background: #e8e8e8; border-radius: 3px; padding: 1px 4px; }
+      input[type='range'] { width: min(600px, 100%); }
+      .row { display: flex; gap: 6px; flex-wrap: wrap; width: min(600px, 100%); }
+      button { font: inherit; padding: 4px 10px; border-radius: 6px; border: 1px solid #ccc; background: #fff; cursor: pointer; }
+      button[aria-pressed='true'] { background: #111; color: #fff; border-color: #111; }
     </style>
   </head>
   <body>
-    <div id="stage"></div>
-    <p>
-      Drag the square. Hover the circle. Neither behaviour is written below — the
-      config just says <code>draggable: true</code> and <code>hover_scale: 1.2</code>.
-      The circle paints over the square only because it comes later in
-      <code>objects</code>; swap the two entries and the stacking flips.
-    </p>
-
     <!--
-      Run `npm run build` first, then serve this over http (`npx http-server -p 8200 .`
-      or `python -m http.server 8200`) — ES modules need an origin, file:// won't load.
+      `npm run build`, then serve over http (`npx http-server -p 8200 .`) —
+      ES modules need an origin, file:// won't load.
     -->
+
+    <h2>1 · Presets</h2>
+    <div id="presets" class="stage"></div>
+    <p>Drag the square, hover the circle. The spec says <code>draggable</code> and <code>hover_scale</code>; no per-node code.</p>
+
+    <h2>2 · An ad, as data</h2>
+    <div id="ad" class="stage banner"></div>
+    <p>A looping campaign banner: headline pops in (<code>outBack</code>), the badge pulses (<code>thereAndBack</code>), the underline draws itself (<code>draw</code>), every 4 seconds (<code>loop: 4</code>). Swap the JSON and the campaign changes — no deploy.</p>
+
+    <h2>3 · Seek: scrub a choreography</h2>
+    <div id="seek" class="stage"></div>
+    <input id="scrub" type="range" min="0" max="6" step="0.01" value="0" aria-label="time" />
+    <p>This scene is never started. The slider calls <code>scene.seek(t)</code>; because keyframes are a pure function of time, any position is exact — the same mechanism a scroll-driven explainer or a video exporter uses.</p>
+
+    <h2>4 · 3D: the figure-8 Klein bottle</h2>
+    <div id="space" class="stage"></div>
+    <p>A <code>space3d</code> node naming <code>klein8</code>, spinning slowly (<code>spin</code>). Drag to orbit (<code>orbit</code>). Depth-banded: far lines faint and thin, near ones bold, faces covering what's behind them.</p>
+
+    <h2>5 · A character with emotions</h2>
+    <div id="character" class="stage"></div>
+    <div id="emotions" class="row"></div>
+    <p>The <code>character</code> plugin with a hand-written face. Change emotion and the face swaps while the motion <em>eases</em> into the new gesture.</p>
+
     <script type="module">
-      import { parseScene } from './dist/index.js';
+      import { parseScene, Scene } from './dist/index.js';
+      import { CharacterNode, EMOTIONS } from './dist/plugins/character.js';
 
-      const config = {
-        width: 600,
-        height: 400,
-        background: '#ffffff',
-        objects: [
-          { id: 'box', type: 'rect', x: 200, y: 200, width: 120, height: 120, rx: 16, fill: '#0B03EC', draggable: true },
-          { id: 'dot', type: 'circle', x: 400, y: 200, radius: 56, fill: '#4ADE80', hover_scale: 1.2 },
-          { id: 'label', type: 'text', x: 300, y: 340, text: 'one clock, two presets, no per-node code', fontSize: 18, fill: '#666666' },
-        ],
+      globalThis.scenes = {};
+
+      // 1 — presets
+      scenes.presets = parseScene(
+        {
+          width: 600, height: 400,
+          objects: [
+            { type: 'rect', x: 220, y: 200, width: 120, height: 120, rx: 16, fill: '#0B03EC', draggable: true },
+            { type: 'circle', x: 400, y: 200, radius: 56, fill: '#4ADE80', hover_scale: 1.2 },
+          ],
+        },
+        document.getElementById('presets'),
+      );
+      scenes.presets.start();
+
+      // 2 — an ad
+      scenes.ad = parseScene(
+        {
+          width: 900, height: 300, background: '#0f172a',
+          objects: [
+            { type: 'text', text: 'FLASH SALE', x: 330, y: 130, fontSize: 64, fill: '#f8fafc', scale: 0,
+              animate: { loop: 4, scale: [{ at: 0.1, dur: 0.6, to: 1, ease: 'outBack' }, { at: 3.4, dur: 0.4, to: 0, ease: 'in' }] } },
+            { type: 'path', d: 'M150 175 L510 175', stroke: '#f59e0b', strokeWidth: 6, draw: 0,
+              animate: { loop: 4, draw: [{ at: 0.6, dur: 0.8, to: 1 }, { at: 3.4, dur: 0.4, to: 0 }] } },
+            { type: 'circle', x: 720, y: 150, radius: 80, fill: '#f59e0b',
+              animate: { loop: 4, scale: [{ at: 1.2, dur: 0.8, to: 1.15, ease: 'thereAndBack' }, { at: 2.2, dur: 0.8, to: 1.15, ease: 'thereAndBack' }],
+                         rotation: [{ at: 0, dur: 4, to: 12, ease: 'wiggle' }] } },
+            { type: 'text', text: '−40%', x: 720, y: 152, fontSize: 44, fill: '#0f172a',
+              animate: { loop: 4, scale: [{ at: 1.2, dur: 0.8, to: 1.15, ease: 'thereAndBack' }, { at: 2.2, dur: 0.8, to: 1.15, ease: 'thereAndBack' }] } },
+          ],
+        },
+        document.getElementById('ad'),
+      );
+      scenes.ad.start();
+
+      // 3 — seek
+      scenes.seek = parseScene(
+        {
+          width: 600, height: 400,
+          objects: [
+            { type: 'polyline', points: [[-150, 0], [0, -120], [150, 0], [0, 120]], closed: true, x: 300, y: 200,
+              stroke: '#0B03EC', strokeWidth: 4, draw: 0,
+              animate: { draw: [{ at: 0, dur: 2, to: 1 }], rotation: [{ at: 2, dur: 2, to: 90 }], scale: [{ at: 4, dur: 2, to: 0.5, ease: 'rushInto' }] } },
+            { type: 'circle', radius: 14, fill: '#e11d48', x: 150, y: 200,
+              animate: { x: [{ at: 0, dur: 3, to: 450 }, { at: 3, dur: 3, to: 150, ease: 'rushFrom' }] } },
+          ],
+        },
+        document.getElementById('seek'),
+      );
+      scenes.seek.seek(0);
+      document.getElementById('scrub').addEventListener('input', (e) => scenes.seek.seek(Number(e.target.value)));
+
+      // 4 — 3D
+      scenes.space = parseScene(
+        {
+          width: 600, height: 400,
+          objects: [
+            { type: 'space3d', x: 300, y: 200, orbit: true, spin: 0.25, camera: { yaw: 0.6, pitch: 0.55, zoom: 38 },
+              items: [{ shape: 'klein8', stroke: '#1e293b', fill: '#6366f1', fillOpacity: 0.16 }] },
+          ],
+        },
+        document.getElementById('space'),
+      );
+      scenes.space.start();
+
+      // 5 — character, with a face drawn by hand (any function returning <svg> markup works)
+      const MOUTHS = {
+        happy: 'M-14 8 Q0 22 14 8', speaking: 'M-10 10 Q0 18 10 10 Q0 14 -10 10', error: 'M-12 14 Q0 4 12 14',
+        thinking: 'M-8 12 L10 10', sleeping: 'M-6 12 L6 12', listening: 'M-8 11 Q0 15 8 11',
       };
-
-      const scene = parseScene(config, document.getElementById('stage'));
-      scene.start();
-
-      // Handy when poking at it from the console.
-      globalThis.scene = scene;
+      const face = (emotion) => {
+        const closed = emotion === 'sleeping';
+        const eyes = closed
+          ? '<path d="M-22 -8 q6 5 12 0 M10 -8 q6 5 12 0" stroke="#0f172a" stroke-width="3" fill="none"/>'
+          : '<circle cx="-16" cy="-8" r="5" fill="#0f172a"/><circle cx="16" cy="-8" r="5" fill="#0f172a"/>';
+        return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-50 -50 100 100">
+          <circle r="44" fill="#fde68a" stroke="#0f172a" stroke-width="3"/>${eyes}
+          <path d="${MOUTHS[emotion] ?? 'M-12 10 Q0 18 12 10'}" stroke="#0f172a" stroke-width="3" fill="none" stroke-linecap="round"/></svg>`;
+      };
+      scenes.character = new Scene({ width: 600, height: 400 }, document.getElementById('character'));
+      const character = scenes.character.add(new CharacterNode({ x: 300, y: 200, size: 180, render: face }));
+      scenes.character.start();
+      const row = document.getElementById('emotions');
+      for (const name of Object.keys(EMOTIONS)) {
+        const b = document.createElement('button');
+        b.textContent = name;
+        b.setAttribute('aria-pressed', String(name === 'idle'));
+        b.onclick = () => {
+          character.setEmotion(name);
+          for (const other of row.children) other.setAttribute('aria-pressed', String(other === b));
+        };
+        row.append(b);
+      }
+      globalThis.character = character;
     </script>
   </body>
 </html>

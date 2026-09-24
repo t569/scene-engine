@@ -1,11 +1,14 @@
 import { SVG_NS } from './scene.js';
+import { compileAnimate, type AnimatedValues } from './timeline.js';
 import type {
   BaseNodeSpec,
   CircleSpec,
-  NodeSpec,
+  PathSpec,
+  PolylineSpec,
   RectSpec,
   SceneLike,
   SceneNode,
+  StrokeSpec,
   TextSpec,
   Vec2,
 } from './types.js';
@@ -52,6 +55,16 @@ export class BaseObject implements SceneNode {
   scaleTarget: number;
   scaleRate = HOVER_RATE;
 
+  /**
+   * Stroke reveal, 0–1, or `undefined` for a node that isn't drawable. Only
+   * meaningful on an element built with `pathLength="1"` — the factories do
+   * that whenever the spec sets `draw` or animates it.
+   */
+  draw: number | undefined;
+
+  private readonly child: SVGElement | null;
+  private readonly animation: ((t: number) => AnimatedValues) | null;
+
   scene: SceneLike | null = null;
 
   private readonly cleanups: Array<() => void> = [];
@@ -66,6 +79,19 @@ export class BaseObject implements SceneNode {
     this.rotation = spec.rotation ?? 0;
     this.opacity = spec.opacity ?? 1;
     this.scaleTarget = this.scale;
+    this.child = child;
+    const drawn = spec as StrokeSpec;
+    this.draw = drawn.draw ?? (spec.animate?.draw ? 0 : undefined);
+    this.animation = spec.animate
+      ? compileAnimate(spec.animate, {
+          x: this.x,
+          y: this.y,
+          scale: this.scale,
+          rotation: this.rotation,
+          opacity: this.opacity,
+          draw: this.draw ?? 0,
+        })
+      : null;
   }
 
   /** Register a teardown to run on `scene.remove(this)` / `scene.destroy()`. */
@@ -81,8 +107,18 @@ export class BaseObject implements SceneNode {
    * Subclasses that override this must call `super.onUpdate(dt, elapsed)`, or
    * presets driven by the clock (`hover_scale`) silently stop easing.
    */
-  onUpdate(dt: number, _elapsed: number): void {
+  onUpdate(dt: number, elapsed: number): void {
     this.scale = approach(this.scale, this.scaleTarget, this.scaleRate, dt);
+    if (!this.animation) return;
+    // Keyframes win over presets for the properties they name: a spec that
+    // animates `scale` has said what the scale is.
+    const v = this.animation(elapsed);
+    if (v.x !== undefined) this.x = v.x;
+    if (v.y !== undefined) this.y = v.y;
+    if (v.scale !== undefined) this.scale = this.scaleTarget = v.scale;
+    if (v.rotation !== undefined) this.rotation = v.rotation;
+    if (v.opacity !== undefined) this.opacity = v.opacity;
+    if (v.draw !== undefined) this.draw = v.draw;
   }
 
   onDestroy(): void {
@@ -97,6 +133,11 @@ export class BaseObject implements SceneNode {
       `translate(${this.x} ${this.y}) rotate(${this.rotation}) scale(${this.scale})`,
     );
     this.el.setAttribute('opacity', String(this.opacity));
+    if (this.draw !== undefined && this.child) {
+      // With pathLength="1", a dash of `draw` followed by a gap of 1 shows
+      // exactly that fraction of the outline.
+      this.child.setAttribute('stroke-dasharray', `${Math.max(0, Math.min(1, this.draw))} 1`);
+    }
   }
 }
 
@@ -112,6 +153,7 @@ export function rect(spec: RectSpec): SVGElement {
   el.setAttribute('height', String(spec.height));
   if (spec.rx !== undefined) el.setAttribute('rx', String(spec.rx));
   el.setAttribute('fill', spec.fill ?? '#0B03EC');
+  applyStroke(el, spec, spec);
   return el;
 }
 
@@ -119,6 +161,35 @@ export function circle(spec: CircleSpec): SVGElement {
   const el = document.createElementNS(SVG_NS, 'circle');
   el.setAttribute('r', String(spec.radius));
   el.setAttribute('fill', spec.fill ?? '#0B03EC');
+  applyStroke(el, spec, spec);
+  return el;
+}
+
+/** Stroke attributes, and `pathLength="1"` when the node is drawable. */
+function applyStroke(el: SVGElement, stroke: StrokeSpec, base: BaseNodeSpec): void {
+  if (stroke.stroke) el.setAttribute('stroke', stroke.stroke);
+  if (stroke.strokeWidth !== undefined) el.setAttribute('stroke-width', String(stroke.strokeWidth));
+  if (stroke.draw !== undefined || base.animate?.draw) {
+    el.setAttribute('pathLength', '1');
+    el.setAttribute('stroke-dasharray', `${stroke.draw ?? 0} 1`);
+  }
+  el.setAttribute('stroke-linecap', 'round');
+  el.setAttribute('stroke-linejoin', 'round');
+}
+
+export function path(spec: PathSpec): SVGElement {
+  const el = document.createElementNS(SVG_NS, 'path');
+  el.setAttribute('d', spec.d);
+  el.setAttribute('fill', spec.fill ?? 'none');
+  applyStroke(el, { stroke: '#111111', ...spec }, spec);
+  return el;
+}
+
+export function polyline(spec: PolylineSpec): SVGElement {
+  const el = document.createElementNS(SVG_NS, spec.closed ? 'polygon' : 'polyline');
+  el.setAttribute('points', spec.points.map(([x, y]) => `${x},${y}`).join(' '));
+  el.setAttribute('fill', spec.fill ?? 'none');
+  applyStroke(el, { stroke: '#111111', ...spec }, spec);
   return el;
 }
 
@@ -220,26 +291,4 @@ function makeHoverScale(obj: BaseObject, hovered: number): void {
     el.removeEventListener('pointerenter', enter);
     el.removeEventListener('pointerleave', leave);
   });
-}
-
-/* ------------------------------------------------------------------ factory */
-
-/**
- * `NodeSpec` to `BaseObject`. The `switch` is exhaustive: the `never` default
- * means adding a member to `NodeSpec` breaks the build here until it is
- * handled, and it doubles as the runtime guard for hand-written JSON.
- */
-export function createObject(spec: NodeSpec, fontFamily?: string): BaseObject {
-  switch (spec.type) {
-    case 'rect':
-      return new BaseObject(rect(spec), spec);
-    case 'circle':
-      return new BaseObject(circle(spec), spec);
-    case 'text':
-      return new BaseObject(text(spec, fontFamily), spec);
-    default: {
-      const unreachable: never = spec;
-      throw new Error(`Unknown node type: ${JSON.stringify(unreachable)}`);
-    }
-  }
 }

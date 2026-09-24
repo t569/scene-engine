@@ -214,19 +214,70 @@ nothing to route between by name.
 | Absent | Why | Add when |
 |---|---|---|
 | YAML parsing | `JSON.parse` is stdlib; YAML is a dependency plus a build step | someone hand-authors scenes and wants comments and no trailing-comma errors |
-| Plugin registry | `scene.add()` already takes any `SceneNode`; the one plugin is a plain import | a second plugin exists and something must choose by name |
-| `<foreignObject>` layering | designed above, not coded | a Canvas/WASM node exists |
+| Plugin registry | `scene.add()` already takes any `SceneNode`; each plugin (DiceBear, character) is a plain import, and neither is chosen by name | something must choose a plugin by name at runtime |
+| Canvas/WebGL via `<foreignObject>` | the seam is now coded, for `tex` (HTML); SVG handles every scene so far, including 3D surfaces | a scene measurably can't keep up in SVG |
 | A generic `ExternalAssetNode` base | the DiceBear plugin (§5) needed no shared base, and one subclass is not a pattern | a second external engine shows what the two genuinely share |
 | Dirty-flag transforms | a dozen `setAttribute`s per frame costs nothing | a profiler says otherwise |
-| A tween/timeline DSL | `onUpdate(dt, elapsed)` plus `approach` covers what exists so far | a scene needs sequenced, seekable choreography |
+| ~~A tween/timeline DSL~~ | **Built in 0.2** as `animate` + `scene.seek`, the moment scenes needed seekable choreography (see §7) | — |
 | Image nodes | no scene needs one yet, though `assets` already accepts `kind: 'image'` | one does |
 | Bring-to-front on drag | it would silently contradict "array order is z-order" | someone asks, and we decide what the JSON should say afterwards |
 
-## 7. Roadmap
+## 7. The Manim layer (0.2)
 
-1. **Now** — core clock, SVG shapes, `draggable` / `hover_scale`, JSON parsing.
-2. **Next** — whichever integration
-   comes first; each one is expected to reveal a missing node type rather than a
-   missing abstraction.
-3. **Later, on evidence** — timeline/sequencing, the first real plugin, Canvas
-   via `<foreignObject>`. In that order, and each only once something needs it.
+Added when three real scenes needed it: an animated assistant, a Klein bottle
+you can orbit and scrub, and campaign banners that loop. Each piece keeps the
+rules above.
+
+**Keyframes are data, and a pure function of time.** `animate: { x: [segment…], loop? }`
+on any node. A segment moves a property to `to` over `dur` from `at`, starting
+from wherever the previous one left it (or `from`). `compileAnimate` sorts once
+and returns `t → values`; nothing accumulates between frames. That is the
+difference from Manim's `play()`, which advances a mobject's state: here the
+state at `t` is recomputed from `t`, so `scene.seek(t)` is exact and free, and
+scroll, a scrubber or a frame-by-frame exporter can own the clock instead of
+`requestAnimationFrame`.
+
+**Easing names are borrowed, not invented.** `smooth` (the default),
+`rushInto`, `rushFrom`, `thereAndBack` and `wiggle` are Manim's rate functions,
+adapted from `manim/utils/rate_functions.py` (MIT); `step` is Blender's CONSTANT
+interpolation. Blender (GPL) is a reference for concepts only: one list of
+keys per property is its F-curve model, flattened for JSON. No Blender code is
+used, and none can be without relicensing this package.
+
+**`draw` is Manim's `Create`, in one attribute.** A drawable element is built
+with `pathLength="1"`, so `stroke-dasharray: draw 1` reveals exactly that
+fraction of any outline, whatever its real length.
+
+**3D is SVG, depth-banded.** `space3d` owns a camera (yaw, pitch, zoom,
+optional perspective distance) and any number of parametric surfaces and
+curves, projected every frame and sorted far to near **together**, so a curve
+can pass behind a surface and out again. Primitives are bucketed into a fixed
+number of depth bands per item, each one `<path>`: the element count is
+`bands × items × 2 + items`, independent of mesh size, and farther bands are
+drawn fainter and thinner. The painter's algorithm at band resolution is
+wrong in principle and right in practice at the opacities these are drawn
+with. `spin` is applied from `elapsed`, so a turning model still seeks.
+
+**Shapes in a spec are names.** `klein8`, `torus`, `sphere`, `mobius`, `helix`,
+`torusKnot`, `lissajous`, with numeric params. Never formula strings: a spec
+can come from a model, and evaluating one of its strings is code execution.
+Code callers pass any function to `Space3D.add`.
+
+**Cost is bounded at the boundary.** `LIMITS` caps object count, polyline
+points, segments, grid and curve resolution. A generated `steps: [1e5, 1e5]`
+is rejected with a named error instead of freezing the tab. Font references
+are refused if they contain characters that could close the `@font-face`
+string, because a `<style>` inside an svg styles the whole host document.
+
+**`tex` is the `<foreignObject>` seam, used.** The host passes a renderer
+(KaTeX's `renderToString`); the engine positions its HTML. Safe with KaTeX's
+default `trust: false`; not with a renderer that passes input through.
+
+**Characters are a plugin with two halves.** `render(emotion) → svg` is the
+face, cached per emotion; a motion table row is the body language, eased
+channel by channel so a mood change is a gesture winding into another.
+
+## 8. Roadmap
+
+Moved to [`ROADMAP.md`](ROADMAP.md), which is kept current. The 0.1 roadmap's
+"later, on evidence" items (timeline, a real plugin, `<foreignObject>`) are §7.

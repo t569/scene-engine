@@ -1,8 +1,9 @@
 # @t569/scene-engine
 
 An SVG-first scene graph for the web. Describe a scene as JSON (or build it in
-TypeScript), hand it one clock, and get interactive, frame-exact animation with
-**zero runtime dependencies** and no framework.
+TypeScript), hand it one clock, and get interactive, frame-exact animation: 2D
+shapes, keyframed choreography you can scrub, 3D surfaces you can orbit, typeset
+math, and characters with emotions. **Zero runtime dependencies**, no framework.
 
 ## What it's for
 
@@ -19,26 +20,37 @@ serve all of them, and a change that helps one by breaking another is wrong.
 The long-term aim is a small Manim/Blender for websites, where any of the above
 can be authored as a document rather than as code. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
+## Sixty seconds
+
 ```ts
 import { parseScene } from '@t569/scene-engine';
 
-const scene = parseScene(
+const banner = parseScene(
   {
-    width: 600,
-    height: 400,
-    background: '#fff',
+    width: 900,
+    height: 300,
+    background: '#0f172a',
     objects: [
-      { type: 'rect', x: 200, y: 200, width: 120, height: 120, rx: 16, draggable: true },
-      { type: 'circle', x: 400, y: 200, radius: 56, fill: '#4ADE80', hover_scale: 1.2 },
+      {
+        type: 'text', text: 'FLASH SALE', x: 330, y: 130, fontSize: 64, fill: '#f8fafc', scale: 0,
+        animate: { loop: 4, scale: [{ at: 0.1, dur: 0.6, to: 1, ease: 'outBack' }] },
+      },
+      {
+        type: 'path', d: 'M150 175 L510 175', stroke: '#f59e0b', strokeWidth: 6, draw: 0,
+        animate: { loop: 4, draw: [{ at: 0.6, dur: 0.8, to: 1 }] },
+      },
+      { type: 'circle', x: 720, y: 150, radius: 80, fill: '#f59e0b', hover_scale: 1.1 },
     ],
   },
   document.getElementById('stage')!,
 );
-scene.start();
+banner.start();
 ```
 
-Drag the square, hover the circle. Neither behaviour is code you wrote: the spec
-says `draggable` and `hover_scale`.
+A looping ad: the headline pops in, the underline draws itself, the badge
+responds to hover. None of it is code you wrote. Open [`demo.html`](demo.html)
+for five live examples (presets, an ad, a scrubbed choreography, a 3D Klein
+bottle, a character).
 
 ## Install
 
@@ -46,18 +58,19 @@ says `draggable` and `hover_scale`.
 npm install github:t569/scene-engine        # or copy it in with git subtree
 ```
 
-The package ships TypeScript source under `src/` and builds to `dist/` with `npm run build`.
+Source is TypeScript under `src/`; `npm run build` emits ESM + types to `dist/`.
 
 ## Concepts
 
 | Idea | Rule |
 |---|---|
-| **One clock** | `Scene` owns the only `requestAnimationFrame` loop. Objects never run timers or CSS transitions; they get `onUpdate(dt, elapsed)`. That is what keeps plugins wrapping other engines frame-exact with native nodes. |
-| **Clamped time** | `dt` is capped at `MAX_DELTA` (0.1s), so a backgrounded tab resumes as a slow frame instead of a teleport. |
-| **Paint order = array order** | No `z` field, ever. Later objects paint over earlier ones. |
-| **Scene units** | Coordinates are in the `viewBox`, not pixels. The svg scales to its box; `toSceneCoords` converts pointer events. |
+| **One clock** | `Scene` owns the only `requestAnimationFrame` loop. Objects never run timers or CSS transitions; they get `onUpdate(dt, elapsed)`. That keeps plugins wrapping other engines frame-exact with native nodes. |
+| **Time is seekable** | Keyframes are a pure function of time, so `scene.seek(t)` paints any moment exactly: scroll can drive a scene, a slider can scrub it, an exporter can step it. |
+| **Clamped time** | While playing, `dt` is capped at 0.1s, so a backgrounded tab resumes as a slow frame instead of a teleport. |
+| **Paint order = array order** | No `z` field, ever. Later objects paint over earlier ones. (Inside `space3d`, depth sorts.) |
+| **Scene units** | Coordinates are in the `viewBox`, not pixels. The svg scales to its box. |
 | **Centred origins** | Shapes are drawn about their own origin, so `rotation` and `scale` pivot about the middle. |
-| **Validate at the boundary** | `parseScene` validates untrusted JSON and throws `SceneSpecError` naming the bad path (`scene.objects[3] (rect) needs numeric width and height`). |
+| **Validate at the boundary** | `parseScene` validates untrusted JSON, caps anything whose cost grows with a number, and throws `SceneSpecError` naming the bad path. |
 
 ## Schema
 
@@ -67,31 +80,102 @@ interface SceneSpec {
   height: number;
   background?: string;
   assets?: { id: string; kind: 'font' | 'image'; src: string; family?: string }[];
-  objects: NodeSpec[];                 // paint order
+  objects: NodeSpec[];                     // paint order
 }
-
-// Every node: id?, x?, y?, scale?, rotation? (degrees), opacity?,
-//             draggable?, hover_scale?
-type NodeSpec =
-  | { type: 'rect'; width: number; height: number; fill?: string; rx?: number }
-  | { type: 'circle'; radius: number; fill?: string }
-  | { type: 'text'; text: string; fill?: string; fontSize?: number; asset_id?: string };
 ```
 
-Fonts in `assets` are registered inside the scene's own `<svg>`, so they leave
-with the scene rather than leaking into the page.
+**Every node** takes `id?`, `x?`, `y?`, `scale?`, `rotation?` (degrees),
+`opacity?`, the presets `draggable?` and `hover_scale?`, and `animate?`.
+
+| `type` | Fields |
+|---|---|
+| `rect` | `width`, `height`, `fill?`, `rx?`, stroke† |
+| `circle` | `radius`, `fill?`, stroke† |
+| `text` | `text`, `fill?`, `fontSize?`, `asset_id?` (a font from `assets`) |
+| `path` | `d` (SVG path data), `fill?` (default none), stroke† |
+| `polyline` | `points: [x, y][]`, `closed?`, `fill?`, stroke† |
+| `tex` | `tex`, `width`, `height`, `color?`, `fontSize?`: needs `renderTex` (below) |
+| `space3d` | `items`, `camera?`, `orbit?`, `spin?` (see 3D) |
+
+† stroke = `stroke?`, `strokeWidth?`, `draw?` (0–1 reveal).
+
+### Animation
+
+```jsonc
+"animate": {
+  "loop": 4,                                        // optional: repeat every 4s
+  "x":       [{ "at": 0, "dur": 1, "to": 200 }, { "at": 2, "dur": 1, "to": 0 }],
+  "opacity": [{ "at": 3, "dur": 0.5, "to": 0, "ease": "in" }],
+  "draw":    [{ "at": 0, "dur": 2, "to": 1 }]       // stroke reveal: Manim's Create
+}
+```
+
+Animatable: `x`, `y`, `scale`, `rotation`, `opacity`, `draw`. A segment runs
+from wherever the property was (or `from`) to `to`, over `dur` seconds from
+`at`, so a list reads like a script. Before its first segment a property holds
+its spec value; after its last it holds the last `to`.
+
+Easings: `smooth` (default), `linear`, `step`, `in`, `out`, `inOut`,
+`outBack`, `inOutSine`, `rushInto`, `rushFrom`, `thereAndBack`, `wiggle`.
+The last two go out and come back, the shape of a pulse or a shake. `smooth`,
+`rushInto`, `rushFrom`, `thereAndBack` and `wiggle` are Manim's rate functions;
+`step` is Blender's CONSTANT interpolation.
+
+### 3D
+
+```jsonc
+{
+  "type": "space3d", "x": 300, "y": 200, "orbit": true, "spin": 0.25,
+  "camera": { "yaw": 0.6, "pitch": 0.55, "zoom": 38, "distance": 12 },
+  "items": [
+    { "shape": "klein8", "stroke": "#1e293b", "fill": "#6366f1", "fillOpacity": 0.16 },
+    { "shape": "torusKnot", "params": { "p": 2, "q": 3 }, "stroke": "#e11d48", "strokeWidth": 2 }
+  ]
+}
+```
+
+Surfaces: `klein8`, `torus`, `sphere`, `mobius`. Curves: `helix`, `torusKnot`,
+`lissajous`. All items share one camera and are depth-sorted together, so a
+curve can pass behind a surface and out again. Omit `distance` for
+orthographic. `steps` sets resolution. Shapes are named, not formula strings,
+because a spec may come from a model and a formula string would be code. In
+TypeScript, `Space3D.add` takes any function (`SurfaceItem` / `CurveItem`),
+with `reveal` (a surface filling in along u), `highlight` (one bold ring) and
+`draw` (a curve drawing itself).
+
+### Math
+
+```ts
+import katex from 'katex';
+parseScene(spec, el, { renderTex: (tex) => katex.renderToString(tex) });
+```
+
+`{ "type": "tex", "tex": "e^{i\\pi} + 1 = 0", "width": 200, "height": 40 }`
+then renders in a `<foreignObject>`. The renderer's output is inserted as
+HTML: safe with KaTeX's default `trust: false`, not with a renderer that
+passes input through.
+
+### Limits
+
+`LIMITS` caps objects (2000), polyline points (5000), segments per property
+(200), surface grid (200 per side), curve samples (4000) and 3D items (32).
+Font references with quote, backslash, newline or angle-bracket characters are
+refused: they are spliced into an `@font-face` rule, and a `<style>` inside an
+svg styles the whole page.
 
 ## API
 
 | Export | What it is |
 |---|---|
-| `parseScene(spec, mount)` | Validate, build and paint a scene. Call `.start()` to animate. |
-| `validateSceneSpec(spec)` | The guard on its own (assertion function). |
-| `Scene` | `add(node, id?)`, `remove`, `find(id)`, `start`, `stop`, `destroy`, `elapsed`. |
-| `BaseObject` | A transform `<g>` around one child. Subclass it for behaviour. |
-| `rect` / `circle` / `text` | Element factories used by the parser. |
+| `parseScene(spec, mount, { renderTex? })` | Validate, build and paint a scene. `.start()` to play. |
+| `validateSceneSpec(spec)`, `SceneSpecError`, `LIMITS` | The guard on its own. |
+| `Scene` | `add(node, id?)`, `remove`, `find(id)`, `start`, `stop`, `seek(t)`, `destroy`, `elapsed`. |
+| `BaseObject` | A transform `<g>` around one child; `x y scale rotation opacity draw`. Subclass for behaviour. |
+| `rect` `circle` `text` `path` `polyline` `texElement` | Element factories. |
+| `createObject(spec, font?, options?)` | One `NodeSpec` → node. |
+| `compileAnimate`, `sampleSegments`, `localTime`, `EASES` | The timeline, pure. |
+| `Space3D`, `SHAPES`, `project`, `itemFromSpec`, `buildPrimitives`, `bandByDepth`, `toPathData` | 3D, pure except `Space3D`. |
 | `approach(current, target, rate, dt)` | Frame-rate-independent exponential easing. |
-| `applyPresets`, `toSceneCoords`, `clampDelta` | The pieces behind the presets and the clock. |
 
 ### Writing behaviour
 
@@ -100,8 +184,8 @@ import { BaseObject, Scene, circle } from '@t569/scene-engine';
 
 class Orbiter extends BaseObject {
   override onUpdate(dt: number, t: number) {
-    super.onUpdate(dt, t);              // keep presets easing
-    this.x = 300 + 120 * Math.cos(t);
+    super.onUpdate(dt, t);              // keep presets and `animate` working
+    this.x = 300 + 120 * Math.cos(t);   // a function of t, so it also seeks
     this.y = 200 + 120 * Math.sin(t);
   }
 }
@@ -111,30 +195,65 @@ scene.add(new Orbiter(circle({ type: 'circle', radius: 12 })));
 scene.start();
 ```
 
+Write motion as a function of `elapsed` where you can; then `seek` works. Something
+that integrates `dt` (velocity, physics) plays fine but holds still on a seek.
+
+### In React
+
+```tsx
+useEffect(() => {
+  const scene = parseScene(spec, ref.current!);
+  if (!matchMedia('(prefers-reduced-motion: reduce)').matches) scene.start();
+  return () => scene.destroy();
+}, [spec]);
+```
+
 ## Plugins
 
-A plugin is a `BaseObject` subclass (or anything implementing `SceneNode`) that
-advances a foreign thing inside `onUpdate`. Plugins are separate entry points and
-are never re-exported from the core, so importing `Scene` pulls in none of them.
+Separate entry points, never re-exported from the core, so importing `Scene`
+pulls in none of them.
 
-- **`@t569/scene-engine/dicebear`**: adopts a DiceBear SVG string as a node. It
-  takes markup rather than a DiceBear instance, so the engine keeps no dependency;
-  `dicebearOptions({ inScene: true })` turns off DiceBear's own CSS animation so
-  the scene's clock is the only one.
+### `@t569/scene-engine/character`
+
+```ts
+import { CharacterNode } from '@t569/scene-engine/character';
+
+const karl = scene.add(new CharacterNode({ x: 300, y: 200, size: 180, render: (emotion) => svgMarkup(emotion) }));
+karl.setEmotion('thinking');
+```
+
+`render` returns `<svg>` markup for an emotion (DiceBear, hand-drawn,
+anything) and is called once per emotion. Each emotion also has a motion row
+(breath, bob, tilt, shake, lean, angle) that is **eased** into, so a change of
+mood is a gesture winding down into another rather than a cut. Built in:
+`idle`, `listening`, `thinking`, `speaking`, `happy`, `sleeping`, `error`, and
+the shopping-assistant set `awaiting_approval`, `syncing`, `escalated`. Add or
+override rows with `motions`. `easeMotion` and `pose` are exported, pure.
+
+### `@t569/scene-engine/dicebear`
+
+Adopts a DiceBear SVG string as a node. It takes markup rather than a DiceBear
+instance, so the engine keeps no dependency; `dicebearOptions({ inScene: true })`
+turns off DiceBear's own CSS animation so the scene's clock is the only one.
 
 ## Development
 
 ```bash
 npm install
-npm test            # vitest
+npm test            # vitest, DOM-free: timeline, projection, validation, motion
 npm run typecheck
 npm run build       # → dist/
 npx http-server -p 8200 .   # then open /demo.html (after a build)
 ```
 
-Design contract, plugin seam and deliberate absences: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+Design contract, plugin seam, the Manim layer and deliberate absences:
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Where it's going:
+[`docs/ROADMAP.md`](docs/ROADMAP.md).
 
-## Origin
+## Credits
 
-Written for [Quickuder](https://quickuder-1.onrender.com/)'s shopping
-assistant and campaign heroes, then extracted so other projects can use it. MIT.
+Easing names and the `smooth` family are adapted from
+[Manim Community](https://github.com/ManimCommunity/manim) (MIT). The keyframe
+model borrows Blender's F-curve idea and its CONSTANT interpolation; no Blender
+code is used. Written for [Quickuder](https://quickuder-1.onrender.com/)'s
+shopping assistant and campaign heroes, then extracted. MIT.
