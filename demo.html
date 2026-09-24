@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>scene-engine — PoC</title>
+    <style>
+      body {
+        margin: 0;
+        font: 14px/1.5 system-ui, sans-serif;
+        background: #f7f7f7;
+        color: #111;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+        padding: 24px 16px;
+      }
+      #stage {
+        width: min(600px, 100%);
+        aspect-ratio: 3 / 2;
+        border-radius: 12px;
+        overflow: hidden;
+        box-shadow: 0 1px 3px rgb(0 0 0 / 0.15);
+      }
+      p {
+        margin: 0;
+        max-width: 600px;
+        color: #555;
+      }
+      code {
+        background: #e8e8e8;
+        border-radius: 3px;
+        padding: 1px 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="stage"></div>
+    <p>
+      Drag the square. Hover the circle. Neither behaviour is written below — the
+      config just says <code>draggable: true</code> and <code>hover_scale: 1.2</code>.
+      The circle paints over the square only because it comes later in
+      <code>objects</code>; swap the two entries and the stacking flips.
+    </p>
+
+    <!--
+      Run `npm run build` first, then serve this over http (`npx http-server -p 8200 .`
+      or `python -m http.server 8200`) — ES modules need an origin, file:// won't load.
+    -->
+    <script type="module">
+      import { parseScene } from './dist/index.js';
+
+      const config = {
+        width: 600,
+        height: 400,
+        background: '#ffffff',
+        objects: [
+          { id: 'box', type: 'rect', x: 200, y: 200, width: 120, height: 120, rx: 16, fill: '#0B03EC', draggable: true },
+          { id: 'dot', type: 'circle', x: 400, y: 200, radius: 56, fill: '#4ADE80', hover_scale: 1.2 },
+          { id: 'label', type: 'text', x: 300, y: 340, text: 'one clock, two presets, no per-node code', fontSize: 18, fill: '#666666' },
+        ],
+      };
+
+      const scene = parseScene(config, document.getElementById('stage'));
+      scene.start();
+
+      // Handy when poking at it from the console.
+      globalThis.scene = scene;
+    </script>
+  </body>
+</html>
