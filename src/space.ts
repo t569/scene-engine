@@ -166,6 +166,8 @@ export const SHAPES: Record<string, SurfaceShape | CurveShape> = {
 interface Style {
   stroke: string;
   strokeWidth: number;
+  /** Opacity of the nearest lines, 0–1; farther ones fade from it. Default 1. */
+  strokeOpacity?: number;
 }
 
 /** A parametric surface. `reveal` and `highlight` are fractions of the u range, 0–1. */
@@ -184,6 +186,8 @@ export interface SurfaceItem extends Style {
   reveal: number;
   /** Draw the constant-u ring at this fraction, bold. `null` for none. */
   highlight: number | null;
+  /** Colour of that ring; defaults to `stroke`. An accent reads as "you are here". */
+  highlightStroke?: string;
 }
 
 /** A parametric curve. `draw` is how much of it is shown, 0–1. */
@@ -415,7 +419,7 @@ export class Space3D extends BaseObject {
         const line = document.createElementNS(SVG_NS, 'path');
         line.setAttribute('fill', 'none');
         line.setAttribute('stroke', item.stroke);
-        line.setAttribute('stroke-opacity', String(0.18 + 0.82 * nearness));
+        line.setAttribute('stroke-opacity', String((item.strokeOpacity ?? 1) * (0.18 + 0.82 * nearness)));
         line.setAttribute('stroke-width', String(item.strokeWidth * (0.6 + 0.6 * nearness)));
         line.setAttribute('stroke-linecap', 'round');
         line.setAttribute('vector-effect', 'non-scaling-stroke');
@@ -427,7 +431,7 @@ export class Space3D extends BaseObject {
     this.highlights = this.items.map((item) => {
       const el = document.createElementNS(SVG_NS, 'path');
       el.setAttribute('fill', 'none');
-      el.setAttribute('stroke', item.stroke);
+      el.setAttribute('stroke', (item.kind === 'surface' && item.highlightStroke) || item.stroke);
       el.setAttribute('stroke-width', String(item.strokeWidth * 2.2));
       el.setAttribute('vector-effect', 'non-scaling-stroke');
       this.group.append(el);
