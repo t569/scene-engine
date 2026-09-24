@@ -281,6 +281,33 @@ mood is a gesture winding down into another rather than a cut. Built in:
 the shopping-assistant set `awaiting_approval`, `syncing`, `escalated`. Add or
 override rows with `motions`. `easeMotion` and `pose` are exported, pure.
 
+### `@t569/scene-engine/graph`
+
+A living graph, Obsidian-style: stars repel, links pull like springs, the
+layout cools and then stops computing. Drag a star (its neighbours follow),
+drag empty space to pan, wheel or pinch to zoom, hover to light up a
+neighbourhood, click to open.
+
+```ts
+import { GraphNode } from '@t569/scene-engine/graph';
+
+const graph = scene.add(new GraphNode({
+  width: 800, height: 600,
+  nodes: [{ id: '/notes', label: 'Notes', kind: 'page', weight: 5 }, …],
+  edges: [{ source: '/notes#s1', target: '/notes', kind: 'part' }, …],
+  kinds: { page: { fill: '#6366f1', radius: 9, label: 'always' }, section: { fill: '#94a3b8', radius: 4, label: 'zoom' } },
+  edgeKinds: { part: { stroke: '#94a3b8', width: 1, opacity: 0.6, length: 34, strength: 0.9 }, … },
+  onOpen: (node) => navigate(node.id),
+}));
+graph.focus('/notes');            // fly the camera to a star
+graph.setHighlight(['/lab']);     // ring stars, e.g. "these were the sources"
+graph.fit();                      // everything in view
+```
+
+`stepForces`, `spiralLayout`, `neighbours` and `zoomAt` are exported pure.
+The one node that doesn't seek: a force layout integrates, so its state at
+`t` depends on every frame before it.
+
 ### `@t569/scene-engine/dicebear`
 
 Adopts a DiceBear SVG string as a node. It takes markup rather than a DiceBear

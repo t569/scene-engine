@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0: the graph plugin
+
+- `@t569/scene-engine/graph`: a force-directed graph node — repulsion, springs, gravity,
+  frame-rate-independent friction, cooling to rest (then no work per frame). Pan, wheel and
+  pinch zoom, drag with reheat, hover neighbourhoods, click to open, `focus()`, `fit()`,
+  `setHighlight()`. Pure physics (`stepForces`) and camera maths (`zoomAt`), tested.
+- `demo.html` gains a living graph.
+
 ## 0.3.0: the interactive layer
 
 Modelled on Brilliant's and Desmos's figures. Additive: every 0.2 spec behaves as before.
