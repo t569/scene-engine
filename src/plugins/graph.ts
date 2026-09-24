@@ -182,7 +182,7 @@ export interface KindStyle {
   fill: string;
   /** Base radius; grows with sqrt(weight). */
   radius: number;
-  /** When the label shows: always, once zoomed in past 1.4×, or only on hover. */
+  /** When the label shows: always, once zoomed in past `labelZoom`, or only on hover. */
   label: 'always' | 'zoom' | 'hover';
 }
 
@@ -208,6 +208,8 @@ export interface GraphOptions extends BaseNodeSpec {
   /** Ring colour for highlighted (e.g. "the assistant used this") stars. */
   highlightColor?: string;
   forces?: Partial<ForceOptions>;
+  /** Zoom at which 'zoom' labels appear. Default 2. */
+  labelZoom?: number;
   onOpen?: (node: GraphNodeData) => void;
   onHover?: (node: GraphNodeData | null) => void;
 }
@@ -310,9 +312,10 @@ export class GraphNode extends BaseObject {
     });
   }
 
+  /** Base radius, growing gently (and boundedly) with weight: a 60-passage page shouldn't eclipse its neighbours. */
   private radiusOf(n: GraphNodeData): number {
     const style = this.opts.kinds[n.kind];
-    return (style?.radius ?? 5) * (1 + Math.sqrt(Math.max(0, (n.weight ?? 1) - 1)) * 0.18);
+    return (style?.radius ?? 5) * (1 + Math.min(1, Math.log2(Math.max(1, n.weight ?? 1)) / 7));
   }
 
   /** Warm the layout back up — after a drag, a filter, new data. */
@@ -337,8 +340,8 @@ export class GraphNode extends BaseObject {
     this.dirty = true;
   }
 
-  /** Zoom and centre to fit every star. */
-  fit(padding = 40): void {
+  /** Zoom and centre to fit every star — never closer than `maxZoom`. */
+  fit(padding = 40, maxZoom = 1.4): void {
     if (!this.sim.length) return;
     let [x0, y0, x1, y1] = [Infinity, Infinity, -Infinity, -Infinity];
     for (const p of this.sim) {
@@ -347,7 +350,7 @@ export class GraphNode extends BaseObject {
       x1 = Math.max(x1, p.x);
       y1 = Math.max(y1, p.y);
     }
-    const k = Math.min(3, (this.opts.width - padding * 2) / (x1 - x0 || 1), (this.opts.height - padding * 2) / (y1 - y0 || 1));
+    const k = Math.min(maxZoom, (this.opts.width - padding * 2) / (x1 - x0 || 1), (this.opts.height - padding * 2) / (y1 - y0 || 1));
     this.cameraTarget = { k, tx: this.opts.width / 2 - ((x0 + x1) / 2) * k, ty: this.opts.height / 2 - ((y0 + y1) / 2) * k };
   }
 
@@ -415,7 +418,7 @@ export class GraphNode extends BaseObject {
       const t = this.labels[i]!;
       const mode = this.opts.kinds[n.kind]?.label ?? 'hover';
       const show =
-        (lit(i) && focus !== null) || this.highlighted.has(i) || mode === 'always' || (mode === 'zoom' && cam.k >= 1.4);
+        (lit(i) && focus !== null) || this.highlighted.has(i) || mode === 'always' || (mode === 'zoom' && cam.k >= (this.opts.labelZoom ?? 2));
       t.setAttribute('x', p.x.toFixed(1));
       t.setAttribute('y', (p.y + r + 13).toFixed(1));
       // Labels keep their size on screen whatever the zoom.
