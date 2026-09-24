@@ -1,0 +1,43 @@
+{
+  "name": "@t569/scene-engine",
+  "version": "0.1.0",
+  "description": "SVG-first scene graph for the web: declarative JSON scenes, one master clock, interaction presets, plugins. Zero runtime dependencies.",
+  "license": "MIT",
+  "author": "t569",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/t569/scene-engine.git"
+  },
+  "keywords": [
+    "svg",
+    "animation",
+    "scene-graph",
+    "math",
+    "visualization"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./dicebear": {
+      "types": "./dist/plugins/dicebear.d.ts",
+      "import": "./dist/plugins/dicebear.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3",
+    "vitest": "^3.2.4"
+  }
+}
