@@ -1,12 +1,16 @@
 import { BaseObject, circle, path, polyline, rect, text } from './objects.ts';
+import { compile, compileTemplate, isTemplate } from './expr.ts';
+import { PlotNode, SliderNode, TemplateText } from './interactive.ts';
 import { Space3D, itemFromSpec } from './space.ts';
 import { texElement, type TexRenderer } from './tex.ts';
-import type { NodeSpec } from './types.ts';
+import type { AnimatableProp, NodeSpec, VisibleWhen } from './types.ts';
 
 /** What building a node may need from outside the spec itself. */
 export interface BuildOptions {
   /** Required only if the spec contains `tex` nodes. */
   renderTex?: TexRenderer;
+  /** The scene's param names — what expressions may refer to (besides `t`, and `x` in a plot). */
+  params?: readonly string[];
 }
 
 /**
@@ -18,13 +22,42 @@ export interface BuildOptions {
  * extends `BaseObject` — in one module that is an import cycle.
  */
 export function createObject(spec: NodeSpec, fontFamily?: string, options: BuildOptions = {}): BaseObject {
+  const vars = [...(options.params ?? []), 't'];
+  const obj = build(spec, fontFamily, options, vars);
+
+  // The interactive layer, on any node.
+  if (spec.bind) {
+    obj.bindings = Object.entries(spec.bind).map(([prop, src]) => [prop as AnimatableProp, compile(src as string, vars)]);
+  }
+  if (spec.visible_when) {
+    const list: VisibleWhen[] = Array.isArray(spec.visible_when) ? spec.visible_when : [spec.visible_when];
+    obj.conditions = list.map((c) => {
+      const f = compile(c.expr, vars);
+      // Neither bound: visible while the value is non-zero.
+      if (c.min === undefined && c.max === undefined) return { f: (env) => (f(env) !== 0 ? 1 : 0), min: 1, max: 1 };
+      return { f, min: c.min ?? -Infinity, max: c.max ?? Infinity };
+    });
+  }
+  if (spec.control) {
+    obj.controls = (['x', 'y'] as const).flatMap((axis) => {
+      const c = spec.control?.[axis];
+      return c ? [{ axis, param: c.param, range: c.range }] : [];
+    });
+  }
+  return obj;
+}
+
+function build(spec: NodeSpec, fontFamily: string | undefined, options: BuildOptions, vars: string[]): BaseObject {
   switch (spec.type) {
     case 'rect':
       return new BaseObject(rect(spec), spec);
     case 'circle':
       return new BaseObject(circle(spec), spec);
-    case 'text':
-      return new BaseObject(text(spec, fontFamily), spec);
+    case 'text': {
+      const el = text(spec, fontFamily);
+      if (!isTemplate(spec.text)) return new BaseObject(el, spec);
+      return new TemplateText(el as SVGTextElement, compileTemplate(spec.text, vars), spec);
+    }
     case 'path':
       return new BaseObject(path(spec), spec);
     case 'polyline':
@@ -40,6 +73,10 @@ export function createObject(spec: NodeSpec, fontFamily?: string, options: Build
       for (const item of spec.items) space.add(itemFromSpec(item));
       return space;
     }
+    case 'plot':
+      return new PlotNode(compile(spec.expr, [...vars, 'x']), /t/.test(spec.expr), spec);
+    case 'slider':
+      return new SliderNode(spec, spec.label ? compileTemplate(spec.label, vars) : null);
     default: {
       const unreachable: never = spec;
       throw new Error(`Unknown node type: ${JSON.stringify(unreachable)}`);

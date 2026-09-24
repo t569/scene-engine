@@ -1,6 +1,8 @@
 import { SVG_NS } from './scene.ts';
 import { compileAnimate, type AnimatedValues } from './timeline.ts';
+import type { Compiled, Env } from './expr.ts';
 import type {
+  AnimatableProp,
   BaseNodeSpec,
   CircleSpec,
   PathSpec,
@@ -62,6 +64,16 @@ export class BaseObject implements SceneNode {
    */
   draw: number | undefined;
 
+  /** Properties recomputed from expressions every frame (`bind`). Set by the factory. */
+  bindings: Array<[AnimatableProp, Compiled]> = [];
+  /** Every one must hold for the node to show (`visible_when`). Set by the factory. */
+  conditions: Array<{ f: Compiled; min: number; max: number }> = [];
+  /** Axes whose position is a param (`control`). */
+  controls: Array<{ axis: 'x' | 'y'; param: string; range: [number, number] }> = [];
+
+  /** 0–1: how shown the node is. Eased while playing, exact on a seek. */
+  private shown = 1;
+  private readonly env: Record<string, number> = Object.create(null);
   private readonly child: SVGElement | null;
   private readonly animation: ((t: number) => AnimatedValues) | null;
 
@@ -109,6 +121,11 @@ export class BaseObject implements SceneNode {
    */
   onUpdate(dt: number, elapsed: number): void {
     this.scale = approach(this.scale, this.scaleTarget, this.scaleRate, dt);
+    this.applyAnimation(elapsed);
+    this.applyInteractive(dt, elapsed);
+  }
+
+  private applyAnimation(elapsed: number): void {
     if (!this.animation) return;
     // Keyframes win over presets for the properties they name: a spec that
     // animates `scale` has said what the scale is.
@@ -119,6 +136,45 @@ export class BaseObject implements SceneNode {
     if (v.rotation !== undefined) this.rotation = v.rotation;
     if (v.opacity !== undefined) this.opacity = v.opacity;
     if (v.draw !== undefined) this.draw = v.draw;
+  }
+
+  /** The params plus `t` — what this node's expressions read. Reused, not reallocated. */
+  protected envAt(elapsed: number): Env {
+    const params = this.scene?.params.values;
+    if (params) Object.assign(this.env, params);
+    this.env.t = elapsed;
+    return this.env;
+  }
+
+  /**
+   * Params → properties: handles, then bindings, then visibility. Runs after
+   * `animate`, so a binding wins over a keyframe for the same property — the
+   * reader's input outranks the choreography.
+   */
+  private applyInteractive(dt: number, elapsed: number): void {
+    if (!this.controls.length && !this.bindings.length && !this.conditions.length) return;
+    const params = this.scene?.params;
+    for (const c of this.controls) {
+      if (!params) break;
+      const [lo, hi] = params.range(c.param);
+      const f = hi === lo ? 0 : (params.get(c.param) - lo) / (hi - lo);
+      this[c.axis] = c.range[0] + (c.range[1] - c.range[0]) * f;
+    }
+    const env = this.envAt(elapsed);
+    for (const [prop, f] of this.bindings) {
+      const v = f(env);
+      if (!Number.isFinite(v)) continue;
+      if (prop === 'scale') this.scale = this.scaleTarget = v;
+      else this[prop] = v;
+    }
+    if (this.conditions.length) {
+      const ok = this.conditions.every(({ f, min, max }) => {
+        const v = f(env);
+        return v >= min && v <= max;
+      });
+      const target = ok ? 1 : 0;
+      this.shown = dt > 0 ? approach(this.shown, target, 12, dt) : target;
+    }
   }
 
   onDestroy(): void {
@@ -132,7 +188,7 @@ export class BaseObject implements SceneNode {
       'transform',
       `translate(${this.x} ${this.y}) rotate(${this.rotation}) scale(${this.scale})`,
     );
-    this.el.setAttribute('opacity', String(this.opacity));
+    this.el.setAttribute('opacity', String(this.opacity * this.shown));
     if (this.draw !== undefined && this.child) {
       // With pathLength="1", a dash of `draw` followed by a gap of 1 shows
       // exactly that fraction of the outline.
@@ -222,7 +278,9 @@ export function toSceneCoords(svg: SVGSVGElement, clientX: number, clientY: numb
 
 /** Reads the high-level flags off a spec and wires the real behaviour. */
 export function applyPresets(obj: BaseObject, spec: BaseNodeSpec, svg: SVGSVGElement): void {
-  if (spec.draggable) makeDraggable(obj, svg);
+  // A handle's position belongs to its params; plain dragging would fight them.
+  if (obj.controls.length) makeControl(obj, svg);
+  else if (spec.draggable) makeDraggable(obj, svg);
   if (spec.hover_scale !== undefined) makeHoverScale(obj, spec.hover_scale);
 }
 
@@ -264,6 +322,50 @@ function makeDraggable(obj: BaseObject, svg: SVGSVGElement): void {
   obj.onCleanup(() => {
     el.removeEventListener('pointerdown', down);
     el.removeEventListener('pointermove', move);
+    el.removeEventListener('pointerup', up);
+    el.removeEventListener('pointercancel', up);
+  });
+}
+
+/**
+ * Drag a handle: the pointer's position becomes param values, which the
+ * handle then follows — so the param's min, max and step are the drag's
+ * constraints, and anything bound to those params moves with it.
+ */
+function makeControl(obj: BaseObject, svg: SVGSVGElement): void {
+  const el = obj.el;
+  el.style.cursor = obj.controls.length === 2 ? 'move' : obj.controls[0]!.axis === 'x' ? 'ew-resize' : 'ns-resize';
+  el.style.touchAction = 'none';
+  let grab: Vec2 | null = null;
+
+  const toParams = (e: PointerEvent): void => {
+    const params = obj.scene?.params;
+    if (!params || !grab) return;
+    const p = toSceneCoords(svg, e.clientX, e.clientY);
+    for (const c of obj.controls) {
+      const at = (c.axis === 'x' ? p.x : p.y) - grab[c.axis];
+      const [lo, hi] = params.range(c.param);
+      const span = c.range[1] - c.range[0];
+      params.set(c.param, lo + ((at - c.range[0]) / (span || 1)) * (hi - lo));
+    }
+  };
+  const down = (e: PointerEvent): void => {
+    const p = toSceneCoords(svg, e.clientX, e.clientY);
+    // Keep the grab offset, so the handle doesn't jump its centre to the pointer.
+    grab = { x: p.x - obj.x, y: p.y - obj.y };
+    el.setPointerCapture(e.pointerId);
+  };
+  const up = (e: PointerEvent): void => {
+    grab = null;
+    if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
+  };
+  el.addEventListener('pointerdown', down);
+  el.addEventListener('pointermove', toParams);
+  el.addEventListener('pointerup', up);
+  el.addEventListener('pointercancel', up);
+  obj.onCleanup(() => {
+    el.removeEventListener('pointerdown', down);
+    el.removeEventListener('pointermove', toParams);
     el.removeEventListener('pointerup', up);
     el.removeEventListener('pointercancel', up);
   });

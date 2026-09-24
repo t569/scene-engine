@@ -3,6 +3,7 @@ import { applyPresets } from './objects.ts';
 import { createObject, type BuildOptions } from './factory.ts';
 import { SHAPES } from './space.ts';
 import { ANIMATABLE, EASES } from './timeline.ts';
+import { ExprError, compile, compileTemplate, isReservedName } from './expr.ts';
 import type { AssetSpec, NodeSpec, SceneSpec } from './types.ts';
 
 /**
@@ -16,6 +17,8 @@ export const LIMITS = {
   gridSteps: 200,
   curveSteps: 4000,
   items3d: 32,
+  params: 32,
+  plotSamples: 2000,
 } as const;
 
 export class SceneSpecError extends Error {
@@ -53,6 +56,10 @@ export function validateSceneSpec(spec: unknown): asserts spec is SceneSpec {
   if (spec.objects.length > LIMITS.objects) {
     throw new SceneSpecError(`scene.objects has ${spec.objects.length} entries — the limit is ${LIMITS.objects}`);
   }
+  const names = validateParams(spec.params);
+  // Every expression in the spec is compiled here, so a bad one fails the load
+  // with its path named — not a frame later, and not silently.
+  exprVars = [...names, 't'];
   if (spec.assets !== undefined) {
     if (!Array.isArray(spec.assets)) throw new SceneSpecError('scene.assets must be an array');
     spec.assets.forEach(validateAsset);
@@ -77,6 +84,94 @@ function validateAsset(asset: unknown, i: number): void {
       throw new SceneSpecError(`${at}.${key} contains a character not allowed in a font reference`);
     }
   }
+}
+
+/** Variables expressions may use while one spec is being validated. */
+let exprVars: string[] = ['t'];
+
+const NAME = /^[A-Za-z_]\w{0,31}$/;
+
+function validateParams(params: unknown): string[] {
+  if (params === undefined) return [];
+  if (!isRecord(params)) throw new SceneSpecError('scene.params must be an object');
+  const names = Object.keys(params);
+  if (names.length > LIMITS.params) throw new SceneSpecError(`scene.params has more than ${LIMITS.params} entries`);
+  for (const name of names) {
+    const at = `scene.params.${name}`;
+    if (!NAME.test(name) || isReservedName(name)) {
+      throw new SceneSpecError(`${at}: a param name must be a plain identifier and not a built-in (t, x, pi, sin, …)`);
+    }
+    const p = params[name];
+    if (!isRecord(p) || !num(p.value)) throw new SceneSpecError(`${at} needs a numeric value`);
+    for (const k of ['min', 'max', 'step'] as const) {
+      if (p[k] !== undefined && !num(p[k])) throw new SceneSpecError(`${at}.${k} must be a number`);
+    }
+    if (num(p.min) && num(p.max) && p.min > p.max) throw new SceneSpecError(`${at}.min is above max`);
+    if (p.step !== undefined && !((p.step as number) > 0)) throw new SceneSpecError(`${at}.step must be positive`);
+  }
+  return names;
+}
+
+function checkExpr(src: unknown, at: string, extra: string[] = []): void {
+  if (typeof src !== 'string') throw new SceneSpecError(`${at} must be an expression string`);
+  try {
+    compile(src, [...exprVars, ...extra]);
+  } catch (e) {
+    throw new SceneSpecError(`${at}: ${e instanceof ExprError ? e.message : 'invalid expression'}`);
+  }
+}
+
+function checkTemplate(src: string, at: string): void {
+  try {
+    compileTemplate(src, exprVars);
+  } catch (e) {
+    throw new SceneSpecError(`${at}: ${e instanceof ExprError ? e.message : 'invalid template'}`);
+  }
+}
+
+function checkParamRef(name: unknown, at: string): void {
+  if (typeof name !== 'string' || name === 't' || !exprVars.includes(name)) {
+    throw new SceneSpecError(`${at} must name one of scene.params`);
+  }
+}
+
+function validateInteractive(node: Record<string, unknown>, at: string): void {
+  if (node.bind !== undefined) {
+    if (!isRecord(node.bind)) throw new SceneSpecError(`${at}.bind must be an object`);
+    for (const [prop, src] of Object.entries(node.bind)) {
+      if (!(ANIMATABLE as readonly string[]).includes(prop)) {
+        throw new SceneSpecError(`${at}.bind.${prop} is not bindable — expected one of ${ANIMATABLE.join(', ')}`);
+      }
+      checkExpr(src, `${at}.bind.${prop}`);
+    }
+  }
+  if (node.visible_when !== undefined) {
+    const many = Array.isArray(node.visible_when);
+    const list: unknown[] = many ? (node.visible_when as unknown[]) : [node.visible_when];
+    list.forEach((c, i) => {
+      const cat = `${at}.visible_when${many ? `[${i}]` : ''}`;
+      if (!isRecord(c)) throw new SceneSpecError(`${cat} must be { expr, min?, max? }`);
+      checkExpr(c.expr, `${cat}.expr`);
+      if (c.min !== undefined && !num(c.min)) throw new SceneSpecError(`${cat}.min must be a number`);
+      if (c.max !== undefined && !num(c.max)) throw new SceneSpecError(`${cat}.max must be a number`);
+    });
+  }
+  if (node.control !== undefined) {
+    if (!isRecord(node.control)) throw new SceneSpecError(`${at}.control must be { x?, y? }`);
+    for (const [axis, c] of Object.entries(node.control)) {
+      const cat = `${at}.control.${axis}`;
+      if (axis !== 'x' && axis !== 'y') throw new SceneSpecError(`${cat}: only x and y can be controlled`);
+      if (!isRecord(c)) throw new SceneSpecError(`${cat} must be { param, range }`);
+      checkParamRef(c.param, `${cat}.param`);
+      if (!Array.isArray(c.range) || c.range.length !== 2 || !c.range.every(num)) {
+        throw new SceneSpecError(`${cat}.range must be [from, to] in scene units`);
+      }
+    }
+  }
+}
+
+function pair(v: unknown): boolean {
+  return Array.isArray(v) && v.length === 2 && v.every(num) && v[0] !== v[1];
 }
 
 function positiveInt(v: unknown, max: number): boolean {
@@ -133,6 +228,7 @@ function validateNode(node: unknown, i: number): void {
   if (!isRecord(node)) throw new SceneSpecError(`${at} must be an object`);
 
   validateAnimate(node.animate, at);
+  validateInteractive(node, at);
 
   switch (node.type) {
     case 'rect':
@@ -145,6 +241,25 @@ function validateNode(node: unknown, i: number): void {
       return;
     case 'text':
       if (typeof node.text !== 'string') throw new SceneSpecError(`${at} (text) needs a text string`);
+      checkTemplate(node.text, `${at}.text`);
+      return;
+    case 'plot':
+      checkExpr(node.expr, `${at}.expr`, ['x']);
+      if (!pair(node.domain) || !pair(node.range)) {
+        throw new SceneSpecError(`${at} (plot) needs domain and range as [from, to] with from ≠ to`);
+      }
+      if (!num(node.width) || !num(node.height)) throw new SceneSpecError(`${at} (plot) needs numeric width and height`);
+      if (node.samples !== undefined && !positiveInt(node.samples, LIMITS.plotSamples)) {
+        throw new SceneSpecError(`${at}.samples must be a whole number from 1 to ${LIMITS.plotSamples}`);
+      }
+      return;
+    case 'slider':
+      checkParamRef(node.param, `${at}.param`);
+      if (!num(node.width) || node.width <= 0) throw new SceneSpecError(`${at} (slider) needs a positive width`);
+      if (node.label !== undefined) {
+        if (typeof node.label !== 'string') throw new SceneSpecError(`${at}.label must be a string`);
+        checkTemplate(node.label, `${at}.label`);
+      }
       return;
     case 'path':
       if (typeof node.d !== 'string') throw new SceneSpecError(`${at} (path) needs a d string`);
@@ -179,7 +294,7 @@ function validateNode(node: unknown, i: number): void {
       return;
     default:
       throw new SceneSpecError(
-        `${at} has unknown type ${JSON.stringify(node.type)} — expected one of rect, circle, text, path, polyline, tex, space3d`,
+        `${at} has unknown type ${JSON.stringify(node.type)} — expected one of rect, circle, text, path, polyline, tex, space3d, plot, slider`,
       );
   }
 }
@@ -231,10 +346,13 @@ export function parseScene(spec: unknown, mount: Element, options: BuildOptions 
   // Array order, start to finish. Each `add` appends, so the array's order
   // becomes the paint order — the implicit z-index, with nothing to maintain.
   for (const node of spec.objects) {
-    const obj = createObject(node, fontFamilyFor(node, assets), options);
+    const obj = createObject(node, fontFamilyFor(node, assets), { ...options, params: scene.params.names() });
     scene.add(obj, node.id);
     applyPresets(obj, node, scene.svg);
-    obj.applyTransform(); // paint once, so a scene that is never started still shows
+    // Paint the t = 0 frame, so a scene that is never started still shows —
+    // bound values, live text and hidden-until-solved nodes included.
+    obj.onUpdate(0, 0);
+    obj.applyTransform();
   }
 
   return scene;

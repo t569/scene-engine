@@ -1,3 +1,4 @@
+import { Params } from './params.ts';
 import type { SceneLike, SceneNode, SceneSpec } from './types.ts';
 
 export const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -36,14 +37,24 @@ export class Scene implements SceneLike {
   /** Seconds since `start()`, advanced by clamped deltas — not wall clock. */
   elapsed = 0;
 
+  /**
+   * The scene's knobs. A change repaints a scene that isn't playing (reduced
+   * motion, a scrubbed explainer), so a slider always answers.
+   */
+  readonly params: Params;
+
   private readonly nodes: SceneNode[] = [];
   private readonly ids = new Map<string, SceneNode>();
   private raf = 0;
   private last = 0;
 
-  constructor(spec: Pick<SceneSpec, 'width' | 'height' | 'background'>, mount: Element) {
+  constructor(spec: Pick<SceneSpec, 'width' | 'height' | 'background' | 'params'>, mount: Element) {
     this.width = spec.width;
     this.height = spec.height;
+    this.params = new Params(spec.params ?? {});
+    this.params.on(() => {
+      if (!this.raf) this.seek(this.elapsed);
+    });
 
     this.svg = document.createElementNS(SVG_NS, 'svg');
     this.svg.setAttribute('viewBox', `0 0 ${spec.width} ${spec.height}`);

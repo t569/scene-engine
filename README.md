@@ -14,7 +14,7 @@ serve all of them, and a change that helps one by breaking another is wrong.
 |---|---|---|
 | **Advertising and campaigns** | Promo heroes, flash-sale banners, product showcases, animated ads | The campaign record carries its own `SceneSpec`, so marketing ships a new animation by changing data, with no code change or deploy. Its first production use was Quickuder's campaign heroes. Unlike a video it stays crisp, tiny, themeable (`fill`/`background` come from the campaign's colours) and interactive. |
 | **Characters** | Animated assistants and mascots with emotions | One clock drives the face, the motion and anything beside it, so nothing drifts out of sync. See the `character` plugin. |
-| **Explanations and simulations** | Math animations, diagrams you can drag and scrub | Manim-style choreography that the reader can interact with instead of only watching. |
+| **Explanations and simulations** | Math animations, diagrams you can drag and scrub, Brilliant-style puzzles | Manim-style choreography plus live params, plots, sliders and goals: the reader changes a number and the figure answers. |
 | **Generated interactive pages** | Model- or tool-authored widgets: a size chart, a comparison, a simulation | A scene is data, so a model can write one; `validateSceneSpec` is the trust boundary that makes that safe to mount. |
 
 The long-term aim is a small Manim/Blender for websites, where any of the above
@@ -85,7 +85,8 @@ interface SceneSpec {
 ```
 
 **Every node** takes `id?`, `x?`, `y?`, `scale?`, `rotation?` (degrees),
-`opacity?`, the presets `draggable?` and `hover_scale?`, and `animate?`.
+`opacity?`, the presets `draggable?` and `hover_scale?`, `animate?`, and the
+interactive `bind?`, `control?` and `visible_when?`. A scene may declare `params`.
 
 | `type` | Fields |
 |---|---|
@@ -95,6 +96,8 @@ interface SceneSpec {
 | `path` | `d` (SVG path data), `fill?` (default none), stroke† |
 | `polyline` | `points: [x, y][]`, `closed?`, `fill?`, stroke† |
 | `tex` | `tex`, `width`, `height`, `color?`, `fontSize?`: needs `renderTex` (below) |
+| `plot` | `expr`, `domain`, `range`, `width`, `height`, `samples?`, `stroke?`, `strokeWidth?`, `axes?` |
+| `slider` | `param`, `width`, `label?`, `color?`, `track?`, `textColor?` |
 | `space3d` | `items`, `camera?`, `orbit?`, `spin?` (see 3D) |
 
 † stroke = `stroke?`, `strokeWidth?`, `draw?` (0–1 reveal).
@@ -143,6 +146,53 @@ TypeScript, `Space3D.add` takes any function (`SurfaceItem` / `CurveItem`),
 with `reveal` (a surface filling in along u), `highlight` (one bold ring,
 coloured by `highlightStroke`), `draw` (a curve drawing itself) and
 `strokeOpacity` (for a figure that sits quietly beside text).
+
+### Interactive: params, formulas, sliders, handles, goals
+
+The interactive layer (0.3) is modelled on what makes Brilliant's and
+Desmos's figures teach: the reader changes a number, and everything that
+depends on it answers at once. All of it is data.
+
+```jsonc
+{
+  "width": 600, "height": 400,
+  "params": {
+    "a": { "value": 0.2, "min": 0, "max": 1.5, "step": 0.05 },
+    "b": { "value": 2, "min": 1, "max": 8, "step": 0.5 }
+  },
+  "objects": [
+    { "type": "plot", "x": 300, "y": 140, "width": 520, "height": 200,
+      "domain": [0, 8], "range": [-1, 1], "expr": "exp(-a*x)*sin(b*x)" },
+    { "type": "slider", "param": "a", "x": 170, "y": 300, "width": 220, "label": "decay a = {a:2}" },
+    { "type": "circle", "radius": 10, "y": 355, "control": { "x": { "param": "b", "range": [40, 560] } } },
+    { "type": "text", "x": 500, "y": 20, "text": "Matched ✓",
+      "visible_when": [{ "expr": "abs(a - 0.6)", "max": 0.001 }, { "expr": "abs(b - 5)", "max": 0.001 }] }
+  ]
+}
+```
+
+| Piece | What it does |
+|---|---|
+| `params` | Named knobs with `value`, `min`, `max`, `step`. One store: every control writes it, everything else reads it. |
+| Expressions | `exp(-a*x)*sin(b*x)`, `300 + 40*a`, `90*sin(t)`: numbers, params, `t` (seconds), `x` (in a plot), `+ − * / % ^`, and whitelisted functions (`sin cos tan asin acos atan atan2 sinh cosh tanh exp ln log log2 sqrt cbrt abs sign floor ceil round pow mod clamp lerp min max hypot`) and constants (`pi e tau`). |
+| `bind` | Any animatable property from an expression, every frame: `{ "bind": { "x": "300 + 40*a" } }`. Wins over `animate`. |
+| `plot` | y = f(x) in a box, re-plotted when a param changes (every frame if it uses `t`). Breaks at poles instead of drawing through them. |
+| `slider` | A slider drawn in the scene, bound to a param; `label` is a template. |
+| `control` | Turns any node into a handle: its position *is* a param, and dragging it sets the param, so the param's range and step constrain the drag. |
+| Templates | Text with `{expr}` or `{expr:digits}` holes updates live: `"period = {2*pi/b:2} s"`. |
+| `visible_when` | Show a node only while `min ≤ expr ≤ max` (all conditions, if a list): goals, hints, step-by-step reveals. |
+
+**Why a parser and not `eval`.** A spec may be written by a model or a
+stranger. Formulas go through a small hand-written parser that knows only
+the grammar above; every name is checked when the spec loads, lookups go
+through `Map`s so `constructor` or `__proto__` reach nothing, and length and
+nesting are capped. A bad formula is a `SceneSpecError` naming its path, at
+load time.
+
+In code: `scene.params.set('a', 1)`, `scene.params.on((name, value) => …)`,
+and `compile(src, vars)` / `compileTemplate(src, vars)` for your own nodes.
+A scene that is not playing repaints on any param change, so controls work
+under reduced motion too.
 
 ### Math
 
