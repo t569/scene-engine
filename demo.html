@@ -66,6 +66,11 @@
     <div id="puzzle" class="stage"></div>
     <p>A Brilliant-style puzzle, written entirely as JSON: two <code>params</code>, a live <code>plot</code> of <code>exp(-a*x)*sin(b*x)</code>, two in-scene <code>slider</code>s, a draggable handle (<code>control</code>) that also sets <code>b</code>, a readout template <code>{a:2}</code>, and a "Matched" line that only shows when both are right (<code>visible_when</code>). No code; no <code>eval</code> — the formulas go through a whitelisted parser.</p>
 
+    <h2>7 · A living graph</h2>
+    <div id="graph" class="stage"></div>
+    <p>The <code>graph</code> plugin: stars repel, links pull, the layout cools and stops computing. Drag a star; drag empty space to pan; wheel or pinch to zoom; hover to light a neighbourhood; click to open.</p>
+    <p id="graph-out" style="font-family: monospace; color: #666">—</p>
+
     <script type="module">
       import { parseScene, Scene } from './dist/index.js';
       import { CharacterNode, EMOTIONS } from './dist/plugins/character.js';
@@ -164,6 +169,36 @@
         row.append(b);
       }
       globalThis.character = character;
+
+      // 7 — the graph plugin
+      const { GraphNode } = await import('./dist/plugins/graph.js');
+      const pages = ['Notes', 'Lab', 'About', 'Series'];
+      const gnodes = pages.map((p) => ({ id: p, label: p, kind: 'page', weight: 6 }));
+      const gedges = [];
+      pages.forEach((p, i) => {
+        for (let j = 0; j < 6; j++) {
+          const id = `${p}#${j}`;
+          gnodes.push({ id, label: `${p} §${j}`, kind: 'section' });
+          gedges.push({ source: id, target: p, kind: 'part' });
+          if (j % 2 === 0) gedges.push({ source: id, target: `${pages[(i + 1) % 4]}#${(j + 1) % 6}`, kind: 'similar' });
+        }
+      });
+      gedges.push({ source: 'Notes', target: 'Lab', kind: 'link' }, { source: 'About', target: 'Notes', kind: 'link' });
+      scenes.graph = new Scene({ width: 600, height: 400 }, document.getElementById('graph'));
+      const graph = scenes.graph.add(new GraphNode({
+        width: 600, height: 400, nodes: gnodes, edges: gedges, labelColor: '#334155', highlightColor: '#f59e0b',
+        kinds: { page: { fill: '#0B03EC', radius: 9, label: 'always' }, section: { fill: '#94a3b8', radius: 4, label: 'zoom' } },
+        edgeKinds: {
+          part: { stroke: '#94a3b8', width: 1, opacity: 0.6, length: 34, strength: 0.9 },
+          link: { stroke: '#0B03EC', width: 1.6, opacity: 0.8, length: 140, strength: 0.4 },
+          similar: { stroke: '#e11d48', width: 1, opacity: 0.45, dash: '3 3', length: 110, strength: 0.15 },
+        },
+        onOpen: (n) => (document.getElementById('graph-out').textContent = 'opened ' + n.id),
+        onHover: (n) => (document.getElementById('graph-out').textContent = n ? 'hover ' + n.id : '—'),
+      }));
+      scenes.graph.start();
+      setTimeout(() => graph.fit(), 1500);
+      globalThis.graph = graph;
 
       // 6 — an interactive puzzle, pure JSON
       const puzzle = {

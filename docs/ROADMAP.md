@@ -45,6 +45,12 @@ Still to come for interactives, on evidence: point-on-curve handles (drag
 along a plotted curve, not just an axis), a `vector` node for fields, and a
 `check` block that reports a goal met to the host (for progress/scoring).
 
+## Done: 0.4, the graph plugin
+
+A physical, Obsidian-style graph (`@t569/scene-engine/graph`), driven by a
+blog's site index: pages and sections as stars, links and nearest-by-meaning
+as lines. Not seekable — the one deliberate exception to the clock's rule.
+
 ## After that, on evidence
 
 1. **Scenes as data, end to end.** Every node above expressible in `SceneSpec`,
