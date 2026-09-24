@@ -35,9 +35,66 @@ export interface BaseNodeSpec {
   draggable?: boolean;
   /** Preset: ease to this scale while hovered, ease back on leave. */
   hover_scale?: number;
+
+  /**
+   * Keyframed properties, as data. Each property gets its own list of segments;
+   * the value at time `t` is a pure function of `t`, so `scene.seek(t)` lands
+   * every animated node exactly where it would have been. See `timeline.ts`.
+   */
+  animate?: AnimateSpec;
 }
 
-export interface RectSpec extends BaseNodeSpec {
+/** The properties `animate` can drive. `draw` reveals a stroke from 0 to 1. */
+export type AnimatableProp = 'x' | 'y' | 'scale' | 'rotation' | 'opacity' | 'draw';
+
+/** Named easing curves. Names rather than functions so a spec stays JSON. */
+export type EaseName =
+  | 'smooth'
+  | 'linear'
+  | 'step'
+  | 'in'
+  | 'out'
+  | 'inOut'
+  | 'outBack'
+  | 'inOutSine'
+  | 'rushInto'
+  | 'rushFrom'
+  | 'thereAndBack'
+  | 'wiggle';
+
+/**
+ * One move: from wherever the property is at `at` (or `from`, if given), to
+ * `to`, over `dur` seconds.
+ */
+export interface Segment {
+  at: number;
+  dur: number;
+  to: number;
+  from?: number;
+  ease?: EaseName;
+}
+
+export type AnimateSpec = Partial<Record<AnimatableProp, Segment[]>> & {
+  /**
+   * Repeat every `loop` seconds: the clock seen by the segments wraps. The
+   * shape an ad or a banner wants, and why it is a number, not a boolean — the
+   * period is part of the choreography.
+   */
+  loop?: number;
+};
+
+/** Stroke styling shared by everything that has an outline. */
+export interface StrokeSpec {
+  stroke?: string;
+  strokeWidth?: number;
+  /**
+   * Initial stroke reveal, 0–1. Setting it (here or in `animate`) is what makes
+   * a node drawable — it is normalised to `pathLength="1"` at build time.
+   */
+  draw?: number;
+}
+
+export interface RectSpec extends BaseNodeSpec, StrokeSpec {
   type: 'rect';
   width: number;
   height: number;
@@ -46,7 +103,7 @@ export interface RectSpec extends BaseNodeSpec {
   rx?: number;
 }
 
-export interface CircleSpec extends BaseNodeSpec {
+export interface CircleSpec extends BaseNodeSpec, StrokeSpec {
   type: 'circle';
   radius: number;
   fill?: string;
@@ -61,11 +118,83 @@ export interface TextSpec extends BaseNodeSpec {
   asset_id?: string;
 }
 
+/** Raw SVG path data. `fill` defaults to none: a path is usually a line. */
+export interface PathSpec extends BaseNodeSpec, StrokeSpec {
+  type: 'path';
+  d: string;
+  fill?: string;
+}
+
+/** Points joined by straight segments, in the node's own coordinates. */
+export interface PolylineSpec extends BaseNodeSpec, StrokeSpec {
+  type: 'polyline';
+  points: Array<[number, number]>;
+  /** Join the last point back to the first. */
+  closed?: boolean;
+  fill?: string;
+}
+
+/**
+ * Typeset mathematics. Rendered by a function the host passes to `parseScene`
+ * (`renderTex`, e.g. KaTeX's `renderToString`), so the engine stays dependency-free.
+ */
+export interface TexSpec extends BaseNodeSpec {
+  type: 'tex';
+  tex: string;
+  /** Box the formula is laid out in, in scene units. */
+  width: number;
+  height: number;
+  color?: string;
+  fontSize?: number;
+}
+
+/** One thing in a 3D space, named rather than written as a formula — see `space.ts`. */
+export interface Space3DItemSpec {
+  /** A built-in surface (`klein8`, `torus`, …) or curve (`helix`, `torusKnot`, …). */
+  shape: string;
+  params?: Record<string, number>;
+  /** Grid resolution: [u steps, v steps] for a surface, [samples] for a curve. */
+  steps?: number[];
+  stroke?: string;
+  fill?: string;
+  /** 0–1: how opaque the nearest face is; farther faces fade. Surfaces only. */
+  fillOpacity?: number;
+  strokeWidth?: number;
+}
+
+export interface Space3DSpec extends BaseNodeSpec {
+  type: 'space3d';
+  camera?: CameraSpec;
+  /** Preset: drag to turn the camera. */
+  orbit?: boolean;
+  /** Radians per second of yaw, for an idle turntable. */
+  spin?: number;
+  items: Space3DItemSpec[];
+}
+
+export interface CameraSpec {
+  /** Radians about the vertical axis. */
+  yaw?: number;
+  /** Radians of tilt toward the viewer. */
+  pitch?: number;
+  /** Model units → scene units. */
+  zoom?: number;
+  /** Distance to the eye, in model units. Omit for orthographic. */
+  distance?: number;
+}
+
 /**
  * Discriminated on `type`. Adding a member here makes the `switch` in
  * `parse.ts` fail to compile until it is handled — which is the point.
  */
-export type NodeSpec = RectSpec | CircleSpec | TextSpec;
+export type NodeSpec =
+  | RectSpec
+  | CircleSpec
+  | TextSpec
+  | PathSpec
+  | PolylineSpec
+  | TexSpec
+  | Space3DSpec;
 
 /**
  * Heavy things are declared once, up here, and referenced by `asset_id` from

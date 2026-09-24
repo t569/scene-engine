@@ -94,6 +94,24 @@ export class Scene implements SceneLike {
     this.raf = 0;
   }
 
+  /**
+   * Jump to time `t` and paint that frame, playing or not.
+   *
+   * This is what lets something other than the rAF loop own time: a scroll
+   * position, a scrubber, an exporter stepping frame by frame. Nodes receive
+   * `dt = 0` and `elapsed = t`, so anything written as a function of `elapsed`
+   * — `animate` keyframes, `spin`, a sine in your own `onUpdate` — lands
+   * exactly. Something that integrates `dt` (a velocity, a physics step) has
+   * no defined position at an arbitrary `t` and simply holds still.
+   */
+  seek(t: number): void {
+    this.elapsed = Math.max(0, t);
+    for (const node of this.nodes) {
+      node.onUpdate?.(0, this.elapsed);
+      node.applyTransform();
+    }
+  }
+
   destroy(): void {
     this.stop();
     for (const node of [...this.nodes]) this.remove(node);
