@@ -93,6 +93,10 @@ export class Scene implements SceneLike {
     return this.ids.get(id);
   }
 
+  get playing(): boolean {
+    return this.raf !== 0;
+  }
+
   start(): void {
     if (this.raf) return;
     this.last = 0;

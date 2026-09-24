@@ -324,6 +324,10 @@ export interface SceneLike {
   readonly height: number;
   /** The scene's knobs. Empty unless the spec (or code) declared some. */
   readonly params: import('./params.ts').Params;
+  /** True while the clock runs. A stopped scene only repaints when told to. */
+  readonly playing: boolean;
+  /** Scene time in seconds — what `t` is in expressions. */
+  readonly elapsed: number;
 }
 
 /**

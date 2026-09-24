@@ -9,7 +9,7 @@
  * Each node keeps its pure half exported and tested: `plotPath` and
  * `sliderValueAt` don't touch the DOM.
  */
-import { BaseObject, toSceneCoords } from './objects.ts';
+import { BaseObject, SETTLE_RATE, approach, toSceneCoords } from './objects.ts';
 import { SVG_NS } from './scene.ts';
 import type { Compiled, Env } from './expr.ts';
 import type { BaseNodeSpec } from './types.ts';
@@ -165,7 +165,10 @@ export class SliderNode extends BaseObject {
   private readonly knob: SVGCircleElement;
   private readonly labelEl: SVGTextElement | null;
   private lastLabel = '';
-  private version = -1;
+  /** Knob position along the track, drawn; eased toward `knobTarget` unless held. */
+  private knobX = Number.NaN;
+  /** Pointer position while dragging — the knob follows it exactly, between steps too. */
+  private heldX: number | null = null;
 
   constructor(
     private readonly opts: SliderOptions,
@@ -215,8 +218,13 @@ export class SliderNode extends BaseObject {
     const el = this.el;
     const set = (e: PointerEvent) => {
       const p = toSceneCoords(scene.svg, e.clientX, e.clientY);
-      const localX = (p.x - this.x) / (this.scale || 1);
-      scene.params.set(this.opts.param, sliderValueAt(localX, this.opts.width, scene.params.range(this.opts.param)));
+      const w = this.opts.width;
+      const localX = Math.min(w / 2, Math.max(-w / 2, (p.x - this.x) / (this.scale || 1)));
+      scene.params.set(this.opts.param, sliderValueAt(localX, w, scene.params.range(this.opts.param)));
+      // Draw the knob under the finger now: smooth between steps, and even when
+      // the scene's clock is stopped.
+      this.heldX = localX;
+      this.drawKnob(localX);
     };
     let dragging = false;
     const down = (e: PointerEvent) => {
@@ -227,7 +235,9 @@ export class SliderNode extends BaseObject {
     const move = (e: PointerEvent) => dragging && set(e);
     const up = (e: PointerEvent) => {
       dragging = false;
+      this.heldX = null; // glide onto the snapped value
       if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
+      if (!scene.playing) this.drawKnob(this.knobTarget());
     };
     el.addEventListener('pointerdown', down);
     el.addEventListener('pointermove', move);
@@ -241,17 +251,33 @@ export class SliderNode extends BaseObject {
     });
   }
 
+  /** Where the knob belongs for the param's current (snapped) value. */
+  private knobTarget(): number {
+    const params = this.scene?.params;
+    if (!params) return -this.opts.width / 2;
+    const [lo, hi] = params.range(this.opts.param);
+    const f = hi === lo ? 0 : (params.get(this.opts.param) - lo) / (hi - lo);
+    return -this.opts.width / 2 + f * this.opts.width;
+  }
+
+  private drawKnob(x: number): void {
+    if (x === this.knobX) return;
+    this.knobX = x;
+    const r = String(Math.round(x * 100) / 100);
+    this.fill.setAttribute('x2', r);
+    this.knob.setAttribute('cx', r);
+  }
+
   override onUpdate(dt: number, elapsed: number): void {
     super.onUpdate(dt, elapsed);
-    const params = this.scene?.params;
-    if (!params) return;
-    if (params.version !== this.version) {
-      this.version = params.version;
-      const [lo, hi] = params.range(this.opts.param);
-      const f = hi === lo ? 0 : (params.get(this.opts.param) - lo) / (hi - lo);
-      const kx = -this.opts.width / 2 + f * this.opts.width;
-      this.fill.setAttribute('x2', String(kx));
-      this.knob.setAttribute('cx', String(kx));
+    if (!this.scene) return;
+    if (this.heldX !== null) {
+      this.drawKnob(this.heldX);
+    } else {
+      const target = this.knobTarget();
+      const next = dt > 0 && Number.isFinite(this.knobX) ? approach(this.knobX, target, SETTLE_RATE, dt) : target;
+      // Close enough is there: stop writing attributes once settled.
+      this.drawKnob(Math.abs(next - target) < 0.05 ? target : next);
     }
     if (this.label && this.labelEl) {
       const text = this.label(this.envAt(elapsed));
