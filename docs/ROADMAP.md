@@ -35,6 +35,16 @@ Klein bottle you can orbit and scrub, and a gallery of math animations.
 | 3D: `camera`, `surface3d`, `curve3d`, `orbit` preset | Klein bottle, surfaces | per-frame projection, depth sort, depth shading |
 | `tex` plugin | labels with real mathematics | host supplies the renderer (KaTeX); engine wraps in `<foreignObject>` |
 
+## Done: 0.3, the interactive layer
+
+Brilliant-style figures as data: `params`, a safe expression language,
+`bind`, `plot`, `slider`, `control` handles, live text templates and
+`visible_when` goals. See ARCHITECTURE §9.
+
+Still to come for interactives, on evidence: point-on-curve handles (drag
+along a plotted curve, not just an axis), a `vector` node for fields, and a
+`check` block that reports a goal met to the host (for progress/scoring).
+
 ## After that, on evidence
 
 1. **Scenes as data, end to end.** Every node above expressible in `SceneSpec`,

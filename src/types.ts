@@ -37,11 +37,44 @@ export interface BaseNodeSpec {
   hover_scale?: number;
 
   /**
+   * Properties computed from expressions every frame, e.g.
+   * `{ x: "300 + 60*a", rotation: "90*sin(t)" }`. Variables: the scene's
+   * params, and `t` (seconds). See `expr.ts` for the language.
+   */
+  bind?: Partial<Record<AnimatableProp, string>>;
+
+  /**
+   * Show the node only while every condition holds — a "Correct!" that appears
+   * when the answer is right, a step that appears when the last one is done.
+   */
+  visible_when?: VisibleWhen | VisibleWhen[];
+
+  /**
+   * Make the node a handle for params: its position *is* the param's value
+   * (mapped onto `range`, in scene units), and dragging it sets the param.
+   * The param's own min/max/step constrain the drag.
+   */
+  control?: { x?: ControlAxis; y?: ControlAxis };
+
+  /**
    * Keyframed properties, as data. Each property gets its own list of segments;
    * the value at time `t` is a pure function of `t`, so `scene.seek(t)` lands
    * every animated node exactly where it would have been. See `timeline.ts`.
    */
   animate?: AnimateSpec;
+}
+
+/** Visible while `min ≤ expr ≤ max`. With neither bound: while `expr` is non-zero. */
+export interface VisibleWhen {
+  expr: string;
+  min?: number;
+  max?: number;
+}
+
+/** One axis of a handle: which param, and where its min and max sit in scene units. */
+export interface ControlAxis {
+  param: string;
+  range: [number, number];
 }
 
 /** The properties `animate` can drive. `draw` reveals a stroke from 0 to 1. */
@@ -111,6 +144,7 @@ export interface CircleSpec extends BaseNodeSpec, StrokeSpec {
 
 export interface TextSpec extends BaseNodeSpec {
   type: 'text';
+  /** Literal, or a template with `{expr}` / `{expr:digits}` holes that update live. */
   text: string;
   fill?: string;
   fontSize?: number;
@@ -187,6 +221,36 @@ export interface CameraSpec {
  * Discriminated on `type`. Adding a member here makes the `switch` in
  * `parse.ts` fail to compile until it is handled — which is the point.
  */
+/**
+ * y = f(x), drawn live. `expr` may use `x`, `t` and the scene's params, and is
+ * re-plotted whenever a param changes. The box is centred on the node's x, y.
+ */
+export interface PlotSpec extends BaseNodeSpec {
+  type: 'plot';
+  expr: string;
+  domain: [number, number];
+  range: [number, number];
+  width: number;
+  height: number;
+  samples?: number;
+  stroke?: string;
+  strokeWidth?: number;
+  /** Frame and axes; default true. */
+  axes?: boolean;
+  axisColor?: string;
+}
+
+/** A slider inside the scene, bound to a param. `label` may be a template: `"a = {a:2}"`. */
+export interface SliderSpec extends BaseNodeSpec {
+  type: 'slider';
+  param: string;
+  width: number;
+  label?: string;
+  color?: string;
+  track?: string;
+  textColor?: string;
+}
+
 export type NodeSpec =
   | RectSpec
   | CircleSpec
@@ -194,7 +258,9 @@ export type NodeSpec =
   | PathSpec
   | PolylineSpec
   | TexSpec
-  | Space3DSpec;
+  | Space3DSpec
+  | PlotSpec
+  | SliderSpec;
 
 /**
  * Heavy things are declared once, up here, and referenced by `asset_id` from
@@ -212,6 +278,12 @@ export interface SceneSpec {
   width: number;
   height: number;
   background?: string;
+  /**
+   * Named knobs — `{ a: { value: 1, min: 0, max: 5, step: 0.1 } }`. Read by
+   * `bind`, `plot`, text templates and `visible_when`; written by `slider`
+   * nodes and `control` handles. What makes a scene interactive.
+   */
+  params?: Record<string, import('./params.ts').ParamSpec>;
   assets?: AssetSpec[];
   /**
    * Render order is array order, strictly. Later entries paint over earlier
@@ -250,6 +322,8 @@ export interface SceneLike {
   readonly svg: SVGSVGElement;
   readonly width: number;
   readonly height: number;
+  /** The scene's knobs. Empty unless the spec (or code) declared some. */
+  readonly params: import('./params.ts').Params;
 }
 
 /**

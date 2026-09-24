@@ -62,6 +62,10 @@
     <div id="emotions" class="row"></div>
     <p>The <code>character</code> plugin with a hand-written face. Change emotion and the face swaps while the motion <em>eases</em> into the new gesture.</p>
 
+    <h2>6 · Interactive: match the curve</h2>
+    <div id="puzzle" class="stage"></div>
+    <p>A Brilliant-style puzzle, written entirely as JSON: two <code>params</code>, a live <code>plot</code> of <code>exp(-a*x)*sin(b*x)</code>, two in-scene <code>slider</code>s, a draggable handle (<code>control</code>) that also sets <code>b</code>, a readout template <code>{a:2}</code>, and a "Matched" line that only shows when both are right (<code>visible_when</code>). No code; no <code>eval</code> — the formulas go through a whitelisted parser.</p>
+
     <script type="module">
       import { parseScene, Scene } from './dist/index.js';
       import { CharacterNode, EMOTIONS } from './dist/plugins/character.js';
@@ -160,6 +164,26 @@
         row.append(b);
       }
       globalThis.character = character;
+
+      // 6 — an interactive puzzle, pure JSON
+      const puzzle = {
+        width: 600, height: 400, background: '#fff',
+        params: { a: { value: 0.2, min: 0, max: 1.5, step: 0.05 }, b: { value: 2, min: 1, max: 8, step: 0.5 } },
+        objects: [
+          { type: 'plot', x: 300, y: 140, width: 520, height: 200, domain: [0, 8], range: [-1, 1], expr: 'exp(-0.6*x)*sin(5*x)', stroke: '#cbd5e1', strokeWidth: 6, axes: false },
+          { type: 'plot', x: 300, y: 140, width: 520, height: 200, domain: [0, 8], range: [-1, 1], expr: 'exp(-a*x)*sin(b*x)', stroke: '#0B03EC', strokeWidth: 2.5 },
+          { type: 'slider', param: 'a', x: 170, y: 300, width: 220, label: 'decay a = {a:2}', color: '#0B03EC' },
+          { type: 'slider', param: 'b', x: 430, y: 300, width: 220, label: 'frequency b = {b:1}', color: '#0B03EC' },
+          { type: 'rect', x: 300, y: 355, width: 520, height: 2, fill: '#e2e8f0' },
+          { id: 'handle', type: 'circle', radius: 10, y: 355, fill: '#e11d48', control: { x: { param: 'b', range: [40, 560] } }, hover_scale: 1.3 },
+          { type: 'text', x: 300, y: 385, text: 'drag me too — b = {b:1}', fontSize: 13, fill: '#64748b' },
+          { type: 'text', x: 300, y: 20, text: 'Match the grey curve', fontSize: 16, fill: '#111' },
+          { id: 'win', type: 'text', x: 500, y: 20, text: 'Matched ✓', fontSize: 18, fill: '#16a34a',
+            visible_when: [{ expr: 'abs(a - 0.6)', max: 0.001 }, { expr: 'abs(b - 5)', max: 0.001 }] },
+        ],
+      };
+      scenes.puzzle = parseScene(puzzle, document.getElementById('puzzle'));
+      scenes.puzzle.start();
     </script>
   </body>
 </html>

@@ -64,3 +64,18 @@ export type {
   TextSpec,
   Vec2,
 } from './types.ts';
+
+/* The interactive layer (0.3): params, a safe expression language, live nodes. */
+export { compile, compileTemplate, isTemplate, isReservedName, ExprError, EXPR_LIMITS, type Compiled, type Env } from './expr.ts';
+export { Params, type ParamSpec } from './params.ts';
+export {
+  PlotNode,
+  SliderNode,
+  TemplateText,
+  plotPath,
+  sliderValueAt,
+  type PlotBox,
+  type PlotOptions,
+  type SliderOptions,
+} from './interactive.ts';
+export type { ControlAxis, PlotSpec, SliderSpec, VisibleWhen } from './types.ts';

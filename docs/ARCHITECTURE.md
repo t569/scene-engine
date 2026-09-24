@@ -277,6 +277,31 @@ default `trust: false`; not with a renderer that passes input through.
 face, cached per emotion; a motion table row is the body language, eased
 channel by channel so a mood change is a gesture winding into another.
 
+## 9. The interactive layer (0.3)
+
+Added for Brilliant-style figures: the reader moves a slider or drags a point,
+and a curve, a readout and a "correct!" all answer. Three decisions carry it.
+
+**One param store per scene.** Controls write params; everything else reads
+them. There is no wiring between a slider and the things it moves — they meet
+at the store, so adding a second control for the same param (a slider *and* a
+handle) needs nothing. `version` increments per change so a plot re-plots only
+when something it could depend on changed.
+
+**A language, not `eval`.** Formulas are the point of an interactive, and specs
+may be machine-written, so the engine carries a parser (`expr.ts`) for exactly
+arithmetic, params, `t`/`x`, whitelisted functions and constants. Compiled to
+closures once, at load, where an unknown name or function is a `SceneSpecError`
+with a path. Environment reads are own-property only.
+
+**Handles are params, not positions.** A `control` node's position is computed
+from its param every frame, and a drag writes the param — never the position.
+So the param's min, max and step are the drag's constraints for free, and a
+handle can never disagree with a slider bound to the same param.
+
+Seeking still works: bindings, plots and templates are functions of params and
+`t`; visibility fades while playing and snaps on a seek.
+
 ## 8. Roadmap
 
 Moved to [`ROADMAP.md`](ROADMAP.md), which is kept current. The 0.1 roadmap's

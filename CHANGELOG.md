@@ -1,6 +1,20 @@
 # Changelog
 
-## Unreleased
+## 0.3.0: the interactive layer
+
+Modelled on Brilliant's and Desmos's figures. Additive: every 0.2 spec behaves as before.
+
+- **`params`** on a scene: named knobs with min / max / step, one store (`scene.params`), change events.
+- **Expressions** (`expr.ts`): a small, hand-written, whitelisted math language — no `eval`. Checked at load time.
+- **`bind`**: any animatable property from an expression, every frame.
+- **`plot`** node: y = f(x) with params and `t`, live; breaks at poles.
+- **`slider`** node: in-scene, bound to a param, templated label.
+- **`control`**: any node becomes a handle whose position is a param.
+- **Text templates**: `{expr}` / `{expr:digits}` holes update live.
+- **`visible_when`**: goals, hints and reveals.
+- A stopped scene repaints on param change; `parseScene` paints the t = 0 frame of every node.
+- `demo.html` gains a match-the-curve puzzle written entirely as JSON.
+
 
 - 3D items take `strokeOpacity` (lines fade from it with depth, default 1), and
   surfaces take `highlightStroke` (the lit ring's own colour, default `stroke`).
