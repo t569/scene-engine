@@ -7,6 +7,13 @@ write. The web part is the constraint that shapes both: it has to be light
 enough to put on a blog page, and interactive, because a reader can do more with
 a scene than watch it.
 
+Manim and Blender describe the *authoring* ambition, not the only audience.
+Advertising came first: campaign heroes whose animation is data on the campaign
+record. It stays a first-class use, with characters, explanations and
+generated pages beside it (see the README's "What it's for"). A feature that
+serves the math scenes must not make an ad heavier, slower to load or harder
+to theme.
+
 The engine's own rule still holds: **add on evidence.** Every item below is
 tied to a real scene that needs it, and lands when that scene is built.
 
