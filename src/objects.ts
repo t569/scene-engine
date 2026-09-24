@@ -29,6 +29,9 @@ export function approach(current: number, target: number, rate: number, dt: numb
   return current + (target - current) * (1 - Math.exp(-rate * dt));
 }
 
+/** How fast a released handle or slider knob glides onto its snapped value. */
+export const SETTLE_RATE = 22;
+
 /** How fast `hover_scale` eases. Tuned by eye; a node can override it. */
 const HOVER_RATE = 14;
 
@@ -70,6 +73,12 @@ export class BaseObject implements SceneNode {
   conditions: Array<{ f: Compiled; min: number; max: number }> = [];
   /** Axes whose position is a param (`control`). */
   controls: Array<{ axis: 'x' | 'y'; param: string; range: [number, number] }> = [];
+  /**
+   * Where the pointer holds a handle, mid-drag. The handle follows this exactly
+   * — between steps too — and only settles onto the snapped value on release.
+   * Drawing the snapped value while dragging makes a handle stutter.
+   */
+  held: { x?: number; y?: number } | null = null;
 
   /** 0–1: how shown the node is. Eased while playing, exact on a seek. */
   private shown = 1;
@@ -156,9 +165,16 @@ export class BaseObject implements SceneNode {
     const params = this.scene?.params;
     for (const c of this.controls) {
       if (!params) break;
+      const held = this.held?.[c.axis];
+      if (held !== undefined) {
+        this[c.axis] = held;
+        continue;
+      }
       const [lo, hi] = params.range(c.param);
       const f = hi === lo ? 0 : (params.get(c.param) - lo) / (hi - lo);
-      this[c.axis] = c.range[0] + (c.range[1] - c.range[0]) * f;
+      const target = c.range[0] + (c.range[1] - c.range[0]) * f;
+      // Glide onto the snapped spot while playing; land exactly on a seek.
+      this[c.axis] = dt > 0 ? approach(this[c.axis], target, SETTLE_RATE, dt) : target;
     }
     const env = this.envAt(elapsed);
     for (const [prop, f] of this.bindings) {
@@ -342,12 +358,19 @@ function makeControl(obj: BaseObject, svg: SVGSVGElement): void {
     const params = obj.scene?.params;
     if (!params || !grab) return;
     const p = toSceneCoords(svg, e.clientX, e.clientY);
+    const held: { x?: number; y?: number } = {};
     for (const c of obj.controls) {
-      const at = (c.axis === 'x' ? p.x : p.y) - grab[c.axis];
+      const [a, b] = c.range;
+      const at = Math.min(Math.max(a, b), Math.max(Math.min(a, b), (c.axis === 'x' ? p.x : p.y) - grab[c.axis]));
+      held[c.axis] = at;
       const [lo, hi] = params.range(c.param);
-      const span = c.range[1] - c.range[0];
-      params.set(c.param, lo + ((at - c.range[0]) / (span || 1)) * (hi - lo));
+      params.set(c.param, lo + ((at - a) / (b - a || 1)) * (hi - lo));
     }
+    // Follow the pointer now, not on the next frame — so the handle is smooth
+    // even in a scene whose clock is stopped.
+    obj.held = held;
+    Object.assign(obj, held);
+    obj.applyTransform();
   };
   const down = (e: PointerEvent): void => {
     const p = toSceneCoords(svg, e.clientX, e.clientY);
@@ -357,7 +380,13 @@ function makeControl(obj: BaseObject, svg: SVGSVGElement): void {
   };
   const up = (e: PointerEvent): void => {
     grab = null;
+    obj.held = null; // settle onto the snapped value
     if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
+    // A stopped scene gets no frame to settle in; land it now.
+    if (obj.scene && !obj.scene.playing) {
+      obj.onUpdate(0, obj.scene.elapsed);
+      obj.applyTransform();
+    }
   };
   el.addEventListener('pointerdown', down);
   el.addEventListener('pointermove', toParams);

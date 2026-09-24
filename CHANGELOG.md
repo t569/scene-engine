@@ -14,6 +14,9 @@ Modelled on Brilliant's and Desmos's figures. Additive: every 0.2 spec behaves a
 - **`visible_when`**: goals, hints and reveals.
 - A stopped scene repaints on param change; `parseScene` paints the t = 0 frame of every node.
 - `demo.html` gains a match-the-curve puzzle written entirely as JSON.
+- Dragging is continuous: a slider knob or `control` handle follows the pointer exactly,
+  between steps too, and glides onto the snapped value on release. `Scene.playing`, and
+  `elapsed` on `SceneLike`.
 
 
 - 3D items take `strokeOpacity` (lines fade from it with depth, default 1), and
