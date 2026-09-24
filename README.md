@@ -4,9 +4,20 @@ An SVG-first scene graph for the web. Describe a scene as JSON (or build it in
 TypeScript), hand it one clock, and get interactive, frame-exact animation with
 **zero runtime dependencies** and no framework.
 
-The long-term aim is a small Manim/Blender for websites: scenes that explain
-mathematics, simulations people (and models) can author as data, and interactive
-pages built from the same parts. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
+## What it's for
+
+One engine, several jobs. None of them is the "real" one; the design has to
+serve all of them, and a change that helps one by breaking another is wrong.
+
+| Use | What it looks like | Why a scene engine and not a video or a component |
+|---|---|---|
+| **Advertising and campaigns** | Promo heroes, flash-sale banners, product showcases, animated ads | The campaign record carries its own `SceneSpec`, so marketing ships a new animation by changing data, with no code change or deploy. Its first production use was [Quickuder](https://quickuder-1.onrender.com/)'s campaign heroes. Unlike a video it stays crisp, tiny, themeable (`fill`/`background` come from the campaign's colours) and interactive. |
+| **Characters** | Animated assistants and mascots with emotions | One clock drives the face, the motion and anything beside it, so nothing drifts out of sync. See the `character` plugin. |
+| **Explanations and simulations** | Math animations, diagrams you can drag and scrub | Manim-style choreography that the reader can interact with instead of only watching. |
+| **Generated interactive pages** | Model- or tool-authored widgets: a size chart, a comparison, a simulation | A scene is data, so a model can write one; `validateSceneSpec` is the trust boundary that makes that safe to mount. |
+
+The long-term aim is a small Manim/Blender for websites, where any of the above
+can be authored as a document rather than as code. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ```ts
 import { parseScene } from '@t569/scene-engine';
