@@ -13,8 +13,8 @@
  * ownership of — only a decision about whose clock animates it, which
  * `dicebearOptions` makes explicit.
  */
-import { BaseObject } from '../objects.js';
-import type { BaseNodeSpec } from '../types.js';
+import { BaseObject } from '../objects.ts';
+import type { BaseNodeSpec } from '../types.ts';
 
 /** DiceBear's animation speeds. `none` renders a static character. */
 export type AnimationVariant = 'none' | 'slowest' | 'slow' | 'medium' | 'fast' | 'fastest';

@@ -1,5 +1,5 @@
-import { SVG_NS } from './scene.js';
-import { compileAnimate, type AnimatedValues } from './timeline.js';
+import { SVG_NS } from './scene.ts';
+import { compileAnimate, type AnimatedValues } from './timeline.ts';
 import type {
   BaseNodeSpec,
   CircleSpec,
@@ -11,7 +11,7 @@ import type {
   StrokeSpec,
   TextSpec,
   Vec2,
-} from './types.js';
+} from './types.ts';
 
 /**
  * Frame-rate-independent easing: move `current` toward `target` at `rate`

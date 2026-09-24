@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { EASES, compileAnimate, localTime, sampleSegments } from './timeline.js';
-import { bandByDepth, buildPrimitives, itemFromSpec, project, type Primitive } from './space.js';
-import { SceneSpecError, validateSceneSpec, LIMITS } from './parse.js';
-import { EMOTIONS, STILL, easeMotion, pose } from './plugins/character.js';
-import type { EaseName, Segment } from './types.js';
+import { EASES, compileAnimate, localTime, sampleSegments } from './timeline.ts';
+import { bandByDepth, buildPrimitives, itemFromSpec, project, type Primitive } from './space.ts';
+import { SceneSpecError, validateSceneSpec, LIMITS } from './parse.ts';
+import { EMOTIONS, STILL, easeMotion, pose } from './plugins/character.ts';
+import type { EaseName, Segment } from './types.ts';
 
 // Still no DOM: timeline, projection, validation and motion are all pure, and
 // they are where the failure modes are. The DOM halves are thin on purpose.

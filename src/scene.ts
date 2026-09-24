@@ -1,4 +1,4 @@
-import type { SceneLike, SceneNode, SceneSpec } from './types.js';
+import type { SceneLike, SceneNode, SceneSpec } from './types.ts';
 
 export const SVG_NS = 'http://www.w3.org/2000/svg';
 

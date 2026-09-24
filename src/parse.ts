@@ -1,9 +1,9 @@
-import { Scene, SVG_NS } from './scene.js';
-import { applyPresets } from './objects.js';
-import { createObject, type BuildOptions } from './factory.js';
-import { SHAPES } from './space.js';
-import { ANIMATABLE, EASES } from './timeline.js';
-import type { AssetSpec, NodeSpec, SceneSpec } from './types.js';
+import { Scene, SVG_NS } from './scene.ts';
+import { applyPresets } from './objects.ts';
+import { createObject, type BuildOptions } from './factory.ts';
+import { SHAPES } from './space.ts';
+import { ANIMATABLE, EASES } from './timeline.ts';
+import type { AssetSpec, NodeSpec, SceneSpec } from './types.ts';
 
 /**
  * Ceilings on anything whose cost grows with a number in the spec. A spec may

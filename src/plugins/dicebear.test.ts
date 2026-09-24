@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dicebearOptions } from './dicebear.js';
+import { dicebearOptions } from './dicebear.ts';
 
 // Only the options mapping is tested here: it is pure, and it encodes the one
 // decision in this plugin that has a real failure mode — whose clock animates

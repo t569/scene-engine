@@ -1,6 +1,6 @@
-import { BaseObject } from './objects.js';
-import { SVG_NS } from './scene.js';
-import type { BaseNodeSpec, CameraSpec, SceneLike, Space3DItemSpec } from './types.js';
+import { BaseObject } from './objects.ts';
+import { SVG_NS } from './scene.ts';
+import type { BaseNodeSpec, CameraSpec, SceneLike, Space3DItemSpec } from './types.ts';
 
 /**
  * 3D, drawn in SVG.

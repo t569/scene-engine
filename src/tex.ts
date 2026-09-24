@@ -1,4 +1,4 @@
-import { SVG_NS } from './scene.js';
+import { SVG_NS } from './scene.ts';
 
 /**
  * Typeset mathematics in a scene.

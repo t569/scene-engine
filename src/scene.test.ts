@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { clampDelta, MAX_DELTA } from './scene.js';
-import { approach } from './objects.js';
-import { SceneSpecError, validateSceneSpec } from './parse.js';
+import { clampDelta, MAX_DELTA } from './scene.ts';
+import { approach } from './objects.ts';
+import { SceneSpecError, validateSceneSpec } from './parse.ts';
 
 // Three asserts, no DOM, no jsdom. Everything with a real failure mode in this
 // engine is either clock arithmetic or schema validation, and neither needs a

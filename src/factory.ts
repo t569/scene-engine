@@ -1,7 +1,7 @@
-import { BaseObject, circle, path, polyline, rect, text } from './objects.js';
-import { Space3D, itemFromSpec } from './space.js';
-import { texElement, type TexRenderer } from './tex.js';
-import type { NodeSpec } from './types.js';
+import { BaseObject, circle, path, polyline, rect, text } from './objects.ts';
+import { Space3D, itemFromSpec } from './space.ts';
+import { texElement, type TexRenderer } from './tex.ts';
+import type { NodeSpec } from './types.ts';
 
 /** What building a node may need from outside the spec itself. */
 export interface BuildOptions {
