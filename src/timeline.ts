@@ -1,4 +1,4 @@
-import type { AnimatableProp, AnimateSpec, EaseName, Segment } from './types.js';
+import type { AnimatableProp, AnimateSpec, EaseName, Segment } from './types.ts';
 
 /**
  * Keyframed animation as a pure function of time.

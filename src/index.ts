@@ -6,7 +6,7 @@
  * if something here isn't enough to do the job, that is a gap in the design,
  * not a reason to reach into `src/`.
  */
-export { Scene, clampDelta, MAX_DELTA, SVG_NS } from './scene.js';
+export { Scene, clampDelta, MAX_DELTA, SVG_NS } from './scene.ts';
 export {
   BaseObject,
   applyPresets,
@@ -17,10 +17,10 @@ export {
   rect,
   text,
   toSceneCoords,
-} from './objects.js';
-export { createObject, type BuildOptions } from './factory.js';
-export { parseScene, validateSceneSpec, SceneSpecError, LIMITS } from './parse.js';
-export { EASES, ANIMATABLE, compileAnimate, sampleSegments, localTime, type AnimatedValues } from './timeline.js';
+} from './objects.ts';
+export { createObject, type BuildOptions } from './factory.ts';
+export { parseScene, validateSceneSpec, SceneSpecError, LIMITS } from './parse.ts';
+export { EASES, ANIMATABLE, compileAnimate, sampleSegments, localTime, type AnimatedValues } from './timeline.ts';
 export {
   Space3D,
   SHAPES,
@@ -37,8 +37,8 @@ export {
   type SpaceItem,
   type SurfaceItem,
   type Vec3,
-} from './space.js';
-export { texElement, type TexBox, type TexRenderer } from './tex.js';
+} from './space.ts';
+export { texElement, type TexBox, type TexRenderer } from './tex.ts';
 
 export type {
   AnimatableProp,
@@ -63,4 +63,4 @@ export type {
   TexSpec,
   TextSpec,
   Vec2,
-} from './types.js';
+} from './types.ts';

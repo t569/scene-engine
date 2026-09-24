@@ -15,9 +15,9 @@
  * shopping assistant, where six gentle variations on one sine all looked like
  * the same animation.
  */
-import { BaseObject, approach } from '../objects.js';
-import type { BaseNodeSpec } from '../types.js';
-import { dicebearElement } from './dicebear.js';
+import { BaseObject, approach } from '../objects.ts';
+import type { BaseNodeSpec } from '../types.ts';
+import { dicebearElement } from './dicebear.ts';
 
 export interface Motion {
   /** Scale oscillation — the breath. */
