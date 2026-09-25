@@ -30,8 +30,8 @@ describe('dicebearOptions', () => {
   });
 
   it('coerces a numeric seed to a string', () => {
-    // Regression: a user id straight off a REST API is a number (Django's
-    // AutoField serializes as int), and DiceBear validates `seed` against a JSON
+    // Regression: a user id straight off a REST API is a number (an integer
+    // primary key), and DiceBear validates `seed` against a JSON
     // Schema — it throws `OptionsValidationError: /seed has an invalid type`
     // rather than coercing. Thrown during a render that kills the React tree.
     const opts = dicebearOptions({ style: 'shapes', seed: 1 }, { inScene: true });

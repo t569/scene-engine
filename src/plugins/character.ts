@@ -11,7 +11,7 @@
  * tilt, shake, lean — whose amplitudes and rates are *eased* toward the new
  * row rather than jumped to, so a change of mood reads as a gesture winding
  * down into another, never a cut. That table, and the lesson that each row
- * needs one dominant channel far from the others, come from Quickuder's
+ * needs one dominant channel far from the others, come from an e-commerce
  * shopping assistant, where six gentle variations on one sine all looked like
  * the same animation.
  */
@@ -55,8 +55,8 @@ export const STILL: Motion = {
 
 /**
  * One row per emotion, each with **one dominant channel**, far apart in both
- * amplitude and frequency. The first six are Quickuder's shopping assistant,
- * kept verbatim so it migrates without a visual change; the rest are for a
+ * amplitude and frequency. The first six come from an e-commerce shopping
+ * assistant; the rest are for a
  * conversational character.
  */
 export const EMOTIONS: Record<string, Motion> = {

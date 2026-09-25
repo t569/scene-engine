@@ -12,7 +12,7 @@ serve all of them, and a change that helps one by breaking another is wrong.
 
 | Use | What it looks like | Why a scene engine and not a video or a component |
 |---|---|---|
-| **Advertising and campaigns** | Promo heroes, flash-sale banners, product showcases, animated ads | The campaign record carries its own `SceneSpec`, so marketing ships a new animation by changing data, with no code change or deploy. Its first production use was Quickuder's campaign heroes. Unlike a video it stays crisp, tiny, themeable (`fill`/`background` come from the campaign's colours) and interactive. |
+| **Advertising and campaigns** | Promo heroes, flash-sale banners, product showcases, animated ads | The campaign record carries its own `SceneSpec`, so marketing ships a new animation by changing data, with no code change or deploy. Its first production use was [Quickuder](https://quickuder-1.onrender.com/)'s campaign heroes. Unlike a video it stays crisp, tiny, themeable (`fill`/`background` come from the campaign's colours) and interactive. |
 | **Characters** | Animated assistants and mascots with emotions | One clock drives the face, the motion and anything beside it, so nothing drifts out of sync. See the `character` plugin. |
 | **Explanations and simulations** | Math animations, diagrams you can drag and scrub, Brilliant-style puzzles | Manim-style choreography plus live params, plots, sliders and goals: the reader changes a number and the figure answers. |
 | **Generated interactive pages** | Model- or tool-authored widgets: a size chart, a comparison, a simulation | A scene is data, so a model can write one; `validateSceneSpec` is the trust boundary that makes that safe to mount. |
@@ -326,12 +326,12 @@ npx http-server -p 8200 .   # then open /demo.html (after a build)
 
 Design contract, plugin seam, the Manim layer and deliberate absences:
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Where it's going:
-[`docs/ROADMAP.md`](docs/ROADMAP.md). How it began: [`docs/history/`](docs/history/).
+[`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## Credits
 
 Easing names and the `smooth` family are adapted from
 [Manim Community](https://github.com/ManimCommunity/manim) (MIT). The keyframe
 model borrows Blender's F-curve idea and its CONSTANT interpolation; no Blender
-code is used. Written for [Quickuder](https://github.com/yensama7/Quickuder)'s
-shopping assistant and campaign heroes, then extracted. MIT.
+code is used. First built for [Quickuder](https://quickuder-1.onrender.com/)'s shopping assistant and campaign
+heroes, then extracted. MIT.

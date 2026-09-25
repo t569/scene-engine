@@ -53,9 +53,8 @@ Additive: every 0.1 spec and export behaves as before.
 
 ## 0.1.0 — extracted
 
-First release as a standalone repository. Extracted unchanged from Quickuder,
-where it was written and used for the shopping assistant's avatar and campaign
-heroes. Scope renamed `@quickuder/scene-engine` → `@t569/scene-engine`.
+First release as a standalone repository, extracted from [Quickuder](https://quickuder-1.onrender.com/)'s
+shopping assistant avatar and campaign heroes.
 
 - `Scene`: one `requestAnimationFrame` clock, clamped deltas, paint order = array order.
 - `BaseObject` with `rect` / `circle` / `text` shapes; `approach()` easing.

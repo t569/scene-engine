@@ -1,9 +1,6 @@
 # Specifications & Architecture: `@t569/scene-engine`
 
-> This is the package's design contract. For why it was first built inside an e-commerce
-> repo (Quickuder) and what it plugged into there, see
-> [`history/quickuder-integration.md`](history/quickuder-integration.md).
-> For the brief that started it, see [`history/original-brief.md`](history/original-brief.md).
+> This is the package's design contract.
 
 ## 1. Philosophy
 
