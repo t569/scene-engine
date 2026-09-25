@@ -5,6 +5,7 @@ import type {
   AnimatableProp,
   BaseNodeSpec,
   CircleSpec,
+  FillBy,
   PathSpec,
   PolylineSpec,
   RectSpec,
@@ -71,6 +72,11 @@ export class BaseObject implements SceneNode {
   bindings: Array<[AnimatableProp, Compiled]> = [];
   /** Every one must hold for the node to show (`visible_when`). Set by the factory. */
   conditions: Array<{ f: Compiled; min: number; max: number }> = [];
+  /**
+   * Some binding or condition reads `t`, so they're evaluated every frame.
+   * Otherwise only when a param changed. Set by the factory.
+   */
+  timed = false;
   /** Axes whose position is a param (`control`). */
   controls: Array<{ axis: 'x' | 'y'; param: string; range: [number, number] }> = [];
   /**
@@ -79,9 +85,22 @@ export class BaseObject implements SceneNode {
    * Drawing the snapped value while dragging makes a handle stutter.
    */
   held: { x?: number; y?: number } | null = null;
+  /** `fill_by`, set by the factory. Repainted only when a param changed. */
+  fillBy: FillBy | null = null;
+  private fillVersion = -1;
 
   /** 0–1: how shown the node is. Eased while playing, exact on a seek. */
   private shown = 1;
+  /** Params version the bindings and conditions were last evaluated at. */
+  private evaluatedAt = -1;
+  private readonly bound: number[] = [];
+  private visibleTarget = 1;
+  /**
+   * What `el` last got: x, y, rotation, scale, opacity, draw. A node that
+   * didn't change costs no DOM write, which in SVG is the expensive part: even
+   * an identical attribute write can invalidate style and paint.
+   */
+  private readonly drawn = [NaN, NaN, NaN, NaN, NaN, NaN];
   private readonly env: Record<string, number> = Object.create(null);
   private readonly child: SVGElement | null;
   private readonly animation: ((t: number) => AnimatedValues) | null;
@@ -161,8 +180,14 @@ export class BaseObject implements SceneNode {
    * reader's input outranks the choreography.
    */
   private applyInteractive(dt: number, elapsed: number): void {
-    if (!this.controls.length && !this.bindings.length && !this.conditions.length) return;
+    if (!this.controls.length && !this.bindings.length && !this.conditions.length && !this.fillBy) return;
     const params = this.scene?.params;
+    if (this.fillBy && this.child && params && params.version !== this.fillVersion) {
+      this.fillVersion = params.version;
+      const { param, palette } = this.fillBy;
+      const i = Math.min(palette.length - 1, Math.max(0, Math.round(params.get(param)) || 0));
+      this.child.setAttribute('fill', palette[i]!);
+    }
     for (const c of this.controls) {
       if (!params) break;
       const held = this.held?.[c.axis];
@@ -176,20 +201,32 @@ export class BaseObject implements SceneNode {
       // Glide onto the snapped spot while playing; land exactly on a seek.
       this[c.axis] = dt > 0 ? approach(this[c.axis], target, SETTLE_RATE, dt) : target;
     }
-    const env = this.envAt(elapsed);
-    for (const [prop, f] of this.bindings) {
-      const v = f(env);
+    // Re-evaluate only when something they read could have changed: a param,
+    // or time for expressions that use `t`. A seek (dt = 0) always recomputes.
+    const version = params?.version ?? 0;
+    if (this.timed || dt === 0 || version !== this.evaluatedAt) {
+      this.evaluatedAt = version;
+      const env = this.envAt(elapsed);
+      for (let i = 0; i < this.bindings.length; i++) this.bound[i] = this.bindings[i]![1](env);
+      if (this.conditions.length) {
+        const ok = this.conditions.every(({ f, min, max }) => {
+          const v = f(env);
+          return v >= min && v <= max;
+        });
+        this.visibleTarget = ok ? 1 : 0;
+      }
+    }
+    // Applied every frame all the same: a binding outranks `animate`, which
+    // has just written the same property.
+    for (let i = 0; i < this.bindings.length; i++) {
+      const v = this.bound[i]!;
       if (!Number.isFinite(v)) continue;
+      const prop = this.bindings[i]![0];
       if (prop === 'scale') this.scale = this.scaleTarget = v;
       else this[prop] = v;
     }
     if (this.conditions.length) {
-      const ok = this.conditions.every(({ f, min, max }) => {
-        const v = f(env);
-        return v >= min && v <= max;
-      });
-      const target = ok ? 1 : 0;
-      this.shown = dt > 0 ? approach(this.shown, target, 12, dt) : target;
+      this.shown = dt > 0 ? approach(this.shown, this.visibleTarget, 12, dt) : this.visibleTarget;
     }
   }
 
@@ -200,12 +237,21 @@ export class BaseObject implements SceneNode {
   }
 
   applyTransform(): void {
-    this.el.setAttribute(
-      'transform',
-      `translate(${this.x} ${this.y}) rotate(${this.rotation}) scale(${this.scale})`,
-    );
-    this.el.setAttribute('opacity', String(this.opacity * this.shown));
-    if (this.draw !== undefined && this.child) {
+    const d = this.drawn;
+    if (d[0] !== this.x || d[1] !== this.y || d[2] !== this.rotation || d[3] !== this.scale) {
+      d[0] = this.x;
+      d[1] = this.y;
+      d[2] = this.rotation;
+      d[3] = this.scale;
+      this.el.setAttribute('transform', `translate(${this.x} ${this.y}) rotate(${this.rotation}) scale(${this.scale})`);
+    }
+    const opacity = this.opacity * this.shown;
+    if (d[4] !== opacity) {
+      d[4] = opacity;
+      this.el.setAttribute('opacity', String(opacity));
+    }
+    if (this.draw !== undefined && this.child && d[5] !== this.draw) {
+      d[5] = this.draw;
       // With pathLength="1", a dash of `draw` followed by a gap of 1 shows
       // exactly that fraction of the outline.
       this.child.setAttribute('stroke-dasharray', `${Math.max(0, Math.min(1, this.draw))} 1`);
@@ -311,6 +357,30 @@ export function applyPresets(obj: BaseObject, spec: BaseNodeSpec, svg: SVGSVGEle
   if (obj.controls.length) makeControl(obj, svg);
   else if (spec.draggable) makeDraggable(obj, svg);
   if (spec.hover_scale !== undefined) makeHoverScale(obj, spec.hover_scale);
+  if (spec.on_click) makeButton(obj, spec.on_click.set);
+}
+
+/** Click, Enter or Space sets params. A real button to assistive tech, too. */
+function makeButton(obj: BaseObject, set: Record<string, number>): void {
+  const el = obj.el;
+  el.style.cursor = 'pointer';
+  el.setAttribute('role', 'button');
+  el.setAttribute('tabindex', '0');
+  const press = (): void => {
+    const params = obj.scene?.params;
+    if (params) for (const [name, v] of Object.entries(set)) params.set(name, v);
+  };
+  const key = (e: KeyboardEvent): void => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    press();
+  };
+  el.addEventListener('click', press);
+  el.addEventListener('keydown', key);
+  obj.onCleanup(() => {
+    el.removeEventListener('click', press);
+    el.removeEventListener('keydown', key);
+  });
 }
 
 function makeDraggable(obj: BaseObject, svg: SVGSVGElement): void {

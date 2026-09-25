@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.5.0: buttons and colour choices
+
+Driven by a shirt designer: pick a style, a colour, a print.
+
+- **`on_click: { set }`** on any node: click, Enter or Space sets params. `role="button"`, focusable.
+- **`fill_by: { param, palette }`**: fill is `palette[round(param)]`; repainted only when a param changes.
+  Palette entries are validated as inert colour strings.
+
+Performance: the per-frame path now does no work a frame doesn't need. Measured per frame, same machine,
+before → after: 2000 static nodes 3.3 → 0.14 ms; 300 live texts + 300 bound nodes 2.1 → 0.14 ms;
+1000 animated nodes 2.0 → 1.1 ms.
+
+- `applyTransform` dirty-checks: a node writes `transform`, `opacity` and the stroke reveal only when
+  they changed. In SVG even an identical attribute write can invalidate style and paint.
+- Bindings, `visible_when` and text templates are re-evaluated only when a param changed, unless they
+  read `t`. `usesTime(f)` (exported) says which do; plots use it too, replacing a regex that took the
+  `t` in `sqrt` for time.
+- Function calls in expressions no longer allocate an argument array per evaluation.
+- `compileAnimate`'s sampler returns one reused object, overwritten each call, instead of a new one per
+  frame. Read it before the next call.
+
 ## 0.4.0: the graph plugin
 
 - `@t569/scene-engine/graph`: a force-directed graph node — repulsion, springs, gravity,

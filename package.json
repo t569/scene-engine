@@ -1,6 +1,6 @@
 {
   "name": "@t569/scene-engine",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "SVG-first scene graph for the web: declarative JSON scenes, one master clock, interaction presets, plugins. Zero runtime dependencies.",
   "license": "MIT",
   "author": "t569",

@@ -49,7 +49,7 @@ banner.start();
 
 A looping ad: the headline pops in, the underline draws itself, the badge
 responds to hover. None of it is code you wrote. Open [`demo.html`](demo.html)
-for five live examples (presets, an ad, a scrubbed choreography, a 3D Klein
+for live examples (presets, an ad, a scrubbed choreography, a 3D Klein
 bottle, a character).
 
 ## Install
@@ -86,7 +86,7 @@ interface SceneSpec {
 
 **Every node** takes `id?`, `x?`, `y?`, `scale?`, `rotation?` (degrees),
 `opacity?`, the presets `draggable?` and `hover_scale?`, `animate?`, and the
-interactive `bind?`, `control?` and `visible_when?`. A scene may declare `params`.
+interactive `bind?`, `control?`, `visible_when?`, `on_click?` and `fill_by?`. A scene may declare `params`.
 
 | `type` | Fields |
 |---|---|
@@ -181,6 +181,8 @@ depends on it answers at once. All of it is data.
 | `control` | Turns any node into a handle: its position *is* a param, and dragging it sets the param, so the param's range and step constrain the drag. |
 | Templates | Text with `{expr}` or `{expr:digits}` holes updates live: `"period = {2*pi/b:2} s"`. |
 | `visible_when` | Show a node only while `min ≤ expr ≤ max` (all conditions, if a list): goals, hints, step-by-step reveals. |
+| `on_click` | `{ "set": { "style": 2 } }`: a click, Enter or Space sets params. Swatches, tabs, "next step" buttons. |
+| `fill_by` | `{ "param": "body", "palette": ["#fff", "#111"] }`: fill is `palette[round(param)]`. A colour that follows a choice. |
 
 **Why a parser and not `eval`.** A spec may be written by a model or a
 stranger. Formulas go through a small hand-written parser that knows only

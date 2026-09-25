@@ -31,6 +31,15 @@ export type Compiled = (env: Env) => number;
 /** Longest expression accepted, and deepest nesting. Specs are data; keep them small. */
 export const EXPR_LIMITS = { length: 500, depth: 40 } as const;
 
+/** Compiled expressions and templates that read `t`. */
+const TIMED = new WeakSet<object>();
+
+/**
+ * True if `f` reads `t`, so its value can change every frame. Anything else
+ * changes only when a param does — nodes use this to skip re-evaluating it.
+ */
+export const usesTime = (f: object): boolean => TIMED.has(f);
+
 const FUNCTIONS = new Map<string, { arity: number | 'any'; fn: (...a: number[]) => number }>([
   ['sin', { arity: 1, fn: Math.sin }],
   ['cos', { arity: 1, fn: Math.cos }],
@@ -116,6 +125,7 @@ export function compile(src: string, vars: Iterable<string>): Compiled {
   const tokens = tokenize(src);
   let pos = 0;
   let depth = 0;
+  let timed = false;
 
   const peek = () => tokens[pos];
   const isOp = (v: string) => {
@@ -217,11 +227,19 @@ export function compile(src: string, vars: Iterable<string>): Compiled {
           throw new ExprError(`${name} takes ${f.arity} argument${f.arity === 1 ? '' : 's'}`);
         }
         if (f.arity === 'any' && args.length === 0) throw new ExprError(`${name} needs arguments`);
-        return (env) => f.fn(...args.map((a) => a(env)));
+        // Fixed arities get their own closure: this runs per frame, per sample, and
+        // spreading a fresh array for sin(x) every call is garbage for nothing.
+        const [a, b, c] = args as [Compiled, Compiled, Compiled];
+        const fn = f.fn;
+        if (args.length === 1) return (env) => fn(a(env));
+        if (args.length === 2) return (env) => fn(a(env), b(env));
+        if (args.length === 3) return (env) => fn(a(env), b(env), c(env));
+        return (env) => fn(...args.map((x) => x(env)));
       }
       const c = CONSTANTS.get(name);
       if (c !== undefined) return () => c;
       if (!allowed.has(name)) throw new ExprError(`unknown name ${JSON.stringify(name)}`);
+      if (name === 't') timed = true;
       // Own-property read only: env objects are plain, but never trust the prototype.
       return (env) => (Object.prototype.hasOwnProperty.call(env, name) ? env[name]! : NaN);
     }
@@ -230,6 +248,7 @@ export function compile(src: string, vars: Iterable<string>): Compiled {
 
   const result = expr();
   if (pos !== tokens.length) throw new ExprError(`unexpected ${JSON.stringify(String(tokens[pos]!.value))}`);
+  if (timed) TIMED.add(result);
   return result;
 }
 
@@ -243,9 +262,11 @@ export function compileTemplate(src: string, vars: Iterable<string>): (env: Env)
   const parts: Array<string | ((env: Env) => string)> = [];
   const re = /\{([^{}:]+)(?::(\d))?\}/g;
   let last = 0;
+  let timed = false;
   for (let m = re.exec(src); m; m = re.exec(src)) {
     parts.push(src.slice(last, m.index));
     const f = compile(m[1]!, allowed);
+    timed ||= usesTime(f);
     const digits = m[2] === undefined ? undefined : Number(m[2]);
     parts.push((env) => {
       const v = f(env);
@@ -255,7 +276,9 @@ export function compileTemplate(src: string, vars: Iterable<string>): (env: Env)
     last = m.index + m[0].length;
   }
   parts.push(src.slice(last));
-  return (env) => parts.map((p) => (typeof p === 'string' ? p : p(env))).join('');
+  const render = (env: Env): string => parts.map((p) => (typeof p === 'string' ? p : p(env))).join('');
+  if (timed) TIMED.add(render);
+  return render;
 }
 
 /** True when `src` contains at least one `{…}` hole. */

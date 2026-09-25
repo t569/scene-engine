@@ -67,7 +67,7 @@ export type {
 } from './types.ts';
 
 /* The interactive layer (0.3): params, a safe expression language, live nodes. */
-export { compile, compileTemplate, isTemplate, isReservedName, ExprError, EXPR_LIMITS, type Compiled, type Env } from './expr.ts';
+export { compile, compileTemplate, isTemplate, usesTime, isReservedName, ExprError, EXPR_LIMITS, type Compiled, type Env } from './expr.ts';
 export { Params, type ParamSpec } from './params.ts';
 export {
   PlotNode,

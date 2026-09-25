@@ -1,5 +1,5 @@
 import { BaseObject, circle, path, polyline, rect, text } from './objects.ts';
-import { compile, compileTemplate, isTemplate } from './expr.ts';
+import { compile, compileTemplate, isTemplate, usesTime } from './expr.ts';
 import { PlotNode, SliderNode, TemplateText } from './interactive.ts';
 import { Space3D, itemFromSpec } from './space.ts';
 import { texElement, type TexRenderer } from './tex.ts';
@@ -28,16 +28,19 @@ export function createObject(spec: NodeSpec, fontFamily?: string, options: Build
   // The interactive layer, on any node.
   if (spec.bind) {
     obj.bindings = Object.entries(spec.bind).map(([prop, src]) => [prop as AnimatableProp, compile(src as string, vars)]);
+    obj.timed ||= obj.bindings.some(([, f]) => usesTime(f));
   }
   if (spec.visible_when) {
     const list: VisibleWhen[] = Array.isArray(spec.visible_when) ? spec.visible_when : [spec.visible_when];
     obj.conditions = list.map((c) => {
       const f = compile(c.expr, vars);
+      obj.timed ||= usesTime(f);
       // Neither bound: visible while the value is non-zero.
       if (c.min === undefined && c.max === undefined) return { f: (env) => (f(env) !== 0 ? 1 : 0), min: 1, max: 1 };
       return { f, min: c.min ?? -Infinity, max: c.max ?? Infinity };
     });
   }
+  if (spec.fill_by) obj.fillBy = spec.fill_by;
   if (spec.control) {
     obj.controls = (['x', 'y'] as const).flatMap((axis) => {
       const c = spec.control?.[axis];
@@ -74,7 +77,10 @@ function build(spec: NodeSpec, fontFamily: string | undefined, options: BuildOpt
       return space;
     }
     case 'plot':
-      return new PlotNode(compile(spec.expr, [...vars, 'x']), /t/.test(spec.expr), spec);
+      {
+      const f = compile(spec.expr, [...vars, 'x']);
+      return new PlotNode(f, usesTime(f), spec);
+    }
     case 'slider':
       return new SliderNode(spec, spec.label ? compileTemplate(spec.label, vars) : null);
     default: {

@@ -19,7 +19,11 @@ export const LIMITS = {
   items3d: 32,
   params: 32,
   plotSamples: 2000,
+  palette: 64,
 } as const;
+
+/** A CSS colour: hex, a name, or rgb()/hsl(). Nothing that could end an attribute. */
+const COLOR = /^[#\w(),.%\s-]{1,64}$/;
 
 export class SceneSpecError extends Error {
   constructor(message: string) {
@@ -155,6 +159,28 @@ function validateInteractive(node: Record<string, unknown>, at: string): void {
       if (c.min !== undefined && !num(c.min)) throw new SceneSpecError(`${cat}.min must be a number`);
       if (c.max !== undefined && !num(c.max)) throw new SceneSpecError(`${cat}.max must be a number`);
     });
+  }
+  if (node.on_click !== undefined) {
+    if (!isRecord(node.on_click) || !isRecord(node.on_click.set)) {
+      throw new SceneSpecError(`${at}.on_click must be { set: { param: value } }`);
+    }
+    for (const [name, v] of Object.entries(node.on_click.set)) {
+      checkParamRef(name, `${at}.on_click.set.${name}`);
+      if (!num(v)) throw new SceneSpecError(`${at}.on_click.set.${name} must be a number`);
+    }
+  }
+  if (node.fill_by !== undefined) {
+    const f = node.fill_by;
+    if (!isRecord(f)) throw new SceneSpecError(`${at}.fill_by must be { param, palette }`);
+    checkParamRef(f.param, `${at}.fill_by.param`);
+    if (
+      !Array.isArray(f.palette) ||
+      f.palette.length < 1 ||
+      f.palette.length > LIMITS.palette ||
+      !f.palette.every((c) => typeof c === 'string' && COLOR.test(c))
+    ) {
+      throw new SceneSpecError(`${at}.fill_by.palette must be 1 to ${LIMITS.palette} colours`);
+    }
   }
   if (node.control !== undefined) {
     if (!isRecord(node.control)) throw new SceneSpecError(`${at}.control must be { x?, y? }`);

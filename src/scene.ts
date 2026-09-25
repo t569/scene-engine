@@ -142,9 +142,7 @@ export class Scene implements SceneLike {
 
     for (const node of this.nodes) {
       node.onUpdate?.(dt, this.elapsed);
-      // ponytail: transform is written unconditionally rather than dirty-tracked.
-      // A dozen setAttribute calls per frame is nothing; add a dirty flag when a
-      // profiler shows this is the cost, not before.
+      // Cheap to call every frame: nodes dirty-check, so one that didn't move writes nothing.
       node.applyTransform();
     }
 
