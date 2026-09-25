@@ -333,5 +333,5 @@ Design contract, plugin seam, the Manim layer and deliberate absences:
 Easing names and the `smooth` family are adapted from
 [Manim Community](https://github.com/ManimCommunity/manim) (MIT). The keyframe
 model borrows Blender's F-curve idea and its CONSTANT interpolation; no Blender
-code is used. Written for [Quickuder](https://quickuder-1.onrender.com/)'s
-shopping assistant and campaign heroes, then extracted. MIT.
+code is used. First built for [Quickuder](https://quickuder-1.onrender.com/)'s shopping assistant and campaign
+heroes, then extracted. MIT.
