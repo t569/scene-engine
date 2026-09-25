@@ -20,6 +20,7 @@ export {
   toSceneCoords,
 } from './objects.ts';
 export { createObject, type BuildOptions } from './factory.ts';
+export { registerNodeType, type NodeTypeDef, type SpecContext, type BuildContext } from './registry.ts';
 export { parseScene, validateSceneSpec, SceneSpecError, LIMITS } from './parse.ts';
 export { EASES, ANIMATABLE, compileAnimate, sampleSegments, localTime, type AnimatedValues } from './timeline.ts';
 export {
@@ -51,6 +52,7 @@ export type {
   EaseName,
   Lifecycle,
   NodeSpec,
+  NodeTypeMap,
   PathSpec,
   PolylineSpec,
   RectSpec,

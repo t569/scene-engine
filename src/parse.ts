@@ -4,6 +4,7 @@ import { createObject, type BuildOptions } from './factory.ts';
 import { SHAPES } from './space.ts';
 import { ANIMATABLE, EASES } from './timeline.ts';
 import { ExprError, compile, compileTemplate, isReservedName } from './expr.ts';
+import { nodeType, registeredTypes, type SpecContext } from './registry.ts';
 import type { AssetSpec, NodeSpec, SceneSpec } from './types.ts';
 
 /**
@@ -318,12 +319,26 @@ function validateNode(node: unknown, i: number): void {
         }
       }
       return;
-    default:
-      throw new SceneSpecError(
-        `${at} has unknown type ${JSON.stringify(node.type)} — expected one of rect, circle, text, path, polyline, tex, space3d, plot, slider`,
-      );
+    default: {
+      const ext = nodeType(node.type);
+      if (ext) return ext.validate(node, at, specContext);
+      const known = ['rect', 'circle', 'text', 'path', 'polyline', 'tex', 'space3d', 'plot', 'slider', ...registeredTypes()];
+      throw new SceneSpecError(`${at} has unknown type ${JSON.stringify(node.type)} — expected one of ${known.join(', ')}`);
+    }
   }
 }
+
+/** The core's checks, for plugin validators: same rules, same error type, same trust boundary. */
+const specContext: SpecContext = {
+  checkExpr: (src, at, extra) => checkExpr(src, at, extra),
+  checkParamRef: (name, at) => checkParamRef(name, at),
+  checkColor: (c, at) => {
+    if (typeof c !== 'string' || !COLOR.test(c)) throw new SceneSpecError(`${at} must be a colour (hex, name, rgb() or hsl())`);
+  },
+  fail: (message) => {
+    throw new SceneSpecError(message);
+  },
+};
 
 /**
  * Fonts declared in `assets` become one `<style>` block inside the scene's own

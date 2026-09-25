@@ -3,12 +3,20 @@ import { compile, compileTemplate, isTemplate, usesTime } from './expr.ts';
 import { PlotNode, SliderNode, TemplateText } from './interactive.ts';
 import { Space3D, itemFromSpec } from './space.ts';
 import { texElement, type TexRenderer } from './tex.ts';
+import { nodeType } from './registry.ts';
 import type { AnimatableProp, NodeSpec, VisibleWhen } from './types.ts';
 
 /** What building a node may need from outside the spec itself. */
 export interface BuildOptions {
   /** Required only if the spec contains `tex` nodes. */
   renderTex?: TexRenderer;
+  /**
+   * Decide what a URL in the spec (a model, a texture) may load. Return the URL
+   * to fetch, or null to refuse. Without it, plugins allow only same-origin and
+   * relative URLs: a spec from a stranger must not make the viewer's browser
+   * call arbitrary servers.
+   */
+  resolveAsset?: (src: string, kind: string) => string | null;
   /** The scene's param names — what expressions may refer to (besides `t`, and `x` in a plot). */
   params?: readonly string[];
 }
@@ -84,8 +92,10 @@ function build(spec: NodeSpec, fontFamily: string | undefined, options: BuildOpt
     case 'slider':
       return new SliderNode(spec, spec.label ? compileTemplate(spec.label, vars) : null);
     default: {
-      const unreachable: never = spec;
-      throw new Error(`Unknown node type: ${JSON.stringify(unreachable)}`);
+      // A plugin's node type (see registry.ts); the validator has already vouched for it.
+      const ext = nodeType((spec as { type: unknown }).type);
+      if (ext) return ext.create(spec, { vars, options });
+      throw new Error(`Unknown node type: ${JSON.stringify((spec as { type: unknown }).type)}`);
     }
   }
 }

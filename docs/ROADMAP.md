@@ -56,8 +56,13 @@ as lines. Not seekable — the one deliberate exception to the clock's rule.
 1. **Scenes as data, end to end.** Every node above expressible in `SceneSpec`,
    so a person *or a model* can author a simulation as JSON. The validator is
    the trust boundary that makes machine-authored scenes safe to mount.
-2. **Canvas / WebGL nodes** via `<foreignObject>`, when an SVG scene measurably
-   can't keep up (dense particle systems, large meshes).
+2. **Canvas / WebGL nodes**: done in 0.6 as the `three` plugin (ARCHITECTURE
+   §10), driven by a room planner, product viewers and a PCB explorer: draw on
+   demand, adaptive resolution, draw-call merging, compressed glTF (Meshopt,
+   KTX2, Draco), and `scene3d` so a 3D scene is data too. Next, on evidence:
+   instancing for many copies of one model, shared WebGL context across
+   several viewers on one page (browsers cap live contexts at ~16), and
+   cross-browser checks (Safari, Firefox).
 3. **A visual editor page**: the Blender half. Select, move and key objects;
    what it saves is a `SceneSpec`. Built on the engine, not beside it.
 4. **Export**: a scene to video/GIF via stepping `seek(t)` frame by frame,

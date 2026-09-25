@@ -269,16 +269,24 @@ export interface SliderSpec extends BaseNodeSpec {
   textColor?: string;
 }
 
-export type NodeSpec =
-  | RectSpec
-  | CircleSpec
-  | TextSpec
-  | PathSpec
-  | PolylineSpec
-  | TexSpec
-  | Space3DSpec
-  | PlotSpec
-  | SliderSpec;
+/**
+ * Every node spec, by `type`. Plugins add theirs by module augmentation
+ * (`declare module '@t569/scene-engine' { interface NodeTypeMap { … } }`)
+ * and register a validator and builder with `registerNodeType`.
+ */
+export interface NodeTypeMap {
+  rect: RectSpec;
+  circle: CircleSpec;
+  text: TextSpec;
+  path: PathSpec;
+  polyline: PolylineSpec;
+  tex: TexSpec;
+  space3d: Space3DSpec;
+  plot: PlotSpec;
+  slider: SliderSpec;
+}
+
+export type NodeSpec = NodeTypeMap[keyof NodeTypeMap];
 
 /**
  * Heavy things are declared once, up here, and referenced by `asset_id` from

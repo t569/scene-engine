@@ -169,15 +169,17 @@ That is the entire adapter pattern. The critical move is turning the foreign
 engine's own loop **off** and advancing it by the scene's `dt` — an engine
 running its own rAF beside ours is the desync the clock exists to prevent.
 
-**Canvas/WebGL layering**, when it lands, goes through `<foreignObject>`: a
-`<foreignObject>` inside the transform `<g>`, with the `<canvas>` inside that.
-The canvas then inherits the node's transform and its position in the paint
-order automatically — no absolute positioning, no separate z-index stack, no
-second coordinate system to keep in sync with the first.
-
-**`<foreignObject>` layering is not built yet**, on purpose — nothing needs a
-Canvas node. The mechanism is written down so it gets implemented rather than
-invented under pressure.
+**Canvas/WebGL layering** was planned through `<foreignObject>` (the canvas
+inherits the node's transform and paint order for free), and that is still
+available as `layer: 'inline'`. But the three plugin (§10) measured it and made
+an **overlay** the default: the canvas is an HTML sibling *under* the SVG,
+placed every frame from the node's own screen matrix, with the SVG on top,
+transparent, and passing pointer events through wherever it paints nothing.
+Under light load that cut janky frames by two thirds (6.8 → 2.5 per 2.5 s) and
+it sidesteps Safari's foreignObject bugs. The cost is the one rule it bends:
+in overlay mode every SVG node paints over the 3D view, including ones earlier
+in the array. That is the documented exception to "array order is z-order";
+`inline` keeps the rule exact.
 
 ### The one that is built: DiceBear
 
@@ -301,6 +303,45 @@ handle can never disagree with a slider bound to the same param.
 
 Seeking still works: bindings, plots and templates are functions of params and
 `t`; visibility fades while playing and snaps on a seek.
+
+## 10. 3D as a plugin (0.6)
+
+`@t569/scene-engine/three`: a WebGL viewport on three.js, by code
+(`ThreeNode`) or as data (`scene3d`). Driven by a room planner, product
+viewers and a PCB explorer, and tuned first for integrated laptop GPUs and
+phones. Four decisions carry it.
+
+**Draw on demand.** The clock still ticks every frame, but a `ThreeNode` renders
+only when something asked: `invalidate('world')` (something moved: shadows are
+redrawn too) or `invalidate('view')` (only the camera, a colour or a light's
+brightness: shadows are reused). Controls, resizes, bindings and `onFrame`
+callbacks that return `true` ask on their own. An idle viewer draws zero frames.
+
+**Adaptive resolution.** A `ResolutionGovernor` (pure, tested) watches the gap
+between consecutive rendered frames and steps the render scale down when they
+run over budget, up after a run of good ones, with hysteresis. The floor is in
+real pixels (0.75 per CSS pixel). A still image is always sharp: 150 ms after
+motion stops, one full-resolution frame is drawn; and the slow tail of an orbit's
+ease-out renders sharp too, since that is when the eye reads detail.
+
+**Fewer draw calls for detailed static parts.** Each draw call costs CPU time
+to submit, and on integrated GPUs through ANGLE that adds up. `mergeStatic(root)`
+merges meshes that share a material into one per material, within a part (so
+picking and per-part motion still work); `scene3d` groups take `merge: true`.
+On a PCB model (Intel Iris Plus): 279 → 100 calls, and an animated frame's CPU
+cost 7.1 → 4.5 ms. That laptop ran at 60 fps either way, so the gain is headroom
+for weaker devices, not a visible difference there. (An earlier reading that
+blamed draw calls for a slow board was taken with other tabs sharing the GPU
+and renderer process; clean measurements belong in a quiet browser.)
+
+**Plugins can add node types.** The core can't import three.js, yet `scene3d`
+has to be validated at the same trust boundary as `rect`. `registry.ts` lets a
+plugin register a validator (given the core's own checks: expressions, params,
+colours) and a builder; TypeScript users get checking through `NodeTypeMap`
+module augmentation. A spec's model URLs go through the host's `resolveAsset`,
+defaulting to same-origin only. Loading sniffs a glTF's `extensionsUsed` from
+the bytes and fetches a decoder (Meshopt, KTX2, Draco) only when the file needs
+one; parsed models are cached per URL and copied per use.
 
 ## 8. Roadmap
 

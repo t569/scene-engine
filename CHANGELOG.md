@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.6.0: 3D, fast, and as data
+
+`@t569/scene-engine/three`, tuned for phones and integrated laptop GPUs first.
+
+- **`scene3d`**: a 3D scene in a SceneSpec: camera, orbit, studio environment, shadow floor, lights,
+  models and primitives, validated at the same trust boundary as 2D (caps on objects, lights, shadow
+  casters, nesting, segments; web URLs only; host `resolveAsset`, default same-origin). Params drive it:
+  `bind` (position, rotation, scale, light intensity), `color_by`, `variant_by` (KHR_materials_variants),
+  `visible_when`, and `on_click` on 3D objects. Animated models play a clip.
+- **`ThreeNode`**: draws on demand (`invalidate('world' | 'view')`; an idle viewer renders nothing,
+  shadows are redrawn only when the world changed); adaptive resolution (`ResolutionGovernor`, floor
+  0.75 real px per CSS px, sharp on settle); pauses off screen; `orbit()` wired to all of it;
+  `pick`, `groundPoint`, `loadModel`; disposes GPU memory and its context on destroy.
+- **Overlay layering** by default: the canvas under the SVG, SVG on top and passing pointer events
+  through. Measured a third of the janky frames of a canvas in a `<foreignObject>`; `layer: 'inline'`
+  keeps exact array-order paint.
+- **Models**: glTF cached per URL and copied per use (`instantiate`, skinned meshes included);
+  Meshopt, KTX2 and Draco decoders fetched only when a file uses them (`gltfExtensions` sniffs the
+  bytes; `configureLoaders` for decoder paths); `loadGLTF` for variants and clips.
+- **`mergeStatic(root)`**: one draw call per material per part. On a PCB model (Intel Iris Plus),
+  279 → 100 calls and the CPU cost of an animated frame 7.1 → 4.5 ms. Not visible in fps on that
+  laptop, which had headroom; it is for weaker devices.
+- Core: **plugin node types** (`registerNodeType`, `NodeTypeMap` augmentation, `SpecContext` with the
+  core's own checks), and `BuildOptions.resolveAsset`.
+- `three` is an optional peer dependency.
+
 ## 0.5.0: buttons and colour choices
 
 Driven by a shirt designer: pick a style, a colour, a print.
