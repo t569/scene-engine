@@ -7,6 +7,8 @@ Driven by a shirt designer: pick a style, a colour, a print.
 - **`on_click: { set }`** on any node: click, Enter or Space sets params. `role="button"`, focusable.
 - **`fill_by: { param, palette }`**: fill is `palette[round(param)]`; repainted only when a param changes.
   Palette entries are validated as inert colour strings.
+- Installing from GitHub works: a `prepare` script builds `dist/` on install. Before, `npm install
+  github:t569/scene-engine` gave a package with no code, since `dist/` isn't committed.
 
 Performance: the per-frame path now does no work a frame doesn't need. Measured per frame, same machine,
 before → after: 2000 static nodes 3.3 → 0.14 ms; 300 live texts + 300 bound nodes 2.1 → 0.14 ms;
