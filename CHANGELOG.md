@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- `ThreeNode` `minResolution`: the adaptive-resolution floor, for fill-bound shaders (a deep-zoom
+  fractal on a full-screen quad) that want to drop further while moving. Default unchanged, 0.75.
+- `ThreeNode.moving(ms)`: code-driven input (drag, wheel, keys) draws at the resolution floor
+  and sharpens when it stops. Input arrives in bursts, which the governor never saw as motion.
+- Settling sharpens in steps (×1.6 scale), each only if the last frame's measured cost predicts
+  under 250 ms. One full-resolution frame of a deep fractal took 6 s and tripped the GPU watchdog.
+- `ThreeNode.frameCost`: the last drawn frame's cost, for callers that adapt their own work.
+
 ## 0.6.0: 3D, fast, and as data
 
 `@t569/scene-engine/three`, tuned for phones and integrated laptop GPUs first.

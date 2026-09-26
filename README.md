@@ -382,8 +382,14 @@ view.onFrame((dt) => { spinner.rotation.y += dt; return true; }); // true = I mo
   camera change (shadows reused). Controls, resizes and `scene3d` bindings do it
   for you. `render: 'always'` opts out.
 - **Adaptive resolution** (`quality: 'auto'`): renders fewer pixels while frames
-  come back slow, never below 0.75 real pixels per CSS pixel, and draws one sharp
-  frame as soon as motion settles.
+  come back slow, never below 0.75 real pixels per CSS pixel (`minResolution`
+  lowers it for fill-bound shaders), and sharpens as soon as motion settles —
+  in steps, each taken only if the last frame's cost says it's affordable, so a
+  view whose sharp frame would take seconds stops short rather than lose the
+  GPU context.
+- **Input at low resolution.** Drags, wheels and keys render in bursts the
+  governor can't judge; call `view.moving()` from such a handler to draw at the
+  floor while it continues and sharpen when it stops. (Orbit is handled already.)
 - **Fewer draw calls.** `mergeStatic(part)` merges meshes sharing a material,
   within a part: less CPU per frame, which matters most on weaker devices.
 - **Compressed models.** Meshopt, KTX2 and Draco glTFs load; each decoder is

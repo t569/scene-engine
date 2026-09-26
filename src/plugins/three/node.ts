@@ -70,6 +70,12 @@ export interface ThreeOptions extends BaseNodeSpec {
   quality?: Quality;
   /** Cap on device pixel ratio. Default 2: a 3× phone would otherwise render 9× the pixels. */
   maxPixelRatio?: number;
+  /**
+   * The lowest resolution `auto` may drop to while moving, in real pixels per CSS pixel.
+   * Default 0.75. Lower suits per-pixel shaders (fractals, ray marching), where cost is
+   * all fill rate and motion hides the softness; the settled frame is always sharp.
+   */
+  minResolution?: number;
 }
 
 export type FrameFn = (dt: number, elapsed: number) => boolean | void;
@@ -312,6 +318,8 @@ export function disposeObject(root: Object3D): void {
 /* -------------------------------------------------------------------- node */
 
 const SETTLE_MS = 150;
+/** A sharpening step is taken only if its predicted cost stays under this. */
+const SHARPEN_MS = 250;
 let hostRuleAdded = false;
 
 export class ThreeNode extends BaseObject {
@@ -341,6 +349,13 @@ export class ThreeNode extends BaseObject {
   private streak = 0;
   private lastRender = 0;
   private lowRes = false;
+  private movingUntil = 0;
+  private drawnScale = 1;
+  private drawnAt = 0;
+  /** The last drawn frame's cost in ms: GPU time where timer queries exist, else how long it held up the next. */
+  private lastCost = 0;
+  /** EXT_disjoint_timer_query_webgl2, where the browser exposes it; queries awaiting results, oldest first. */
+  private timer: { gl: WebGL2RenderingContext; ext: { TIME_ELAPSED_EXT: number; GPU_DISJOINT_EXT: number }; queries: WebGLQuery[] } | null = null;
   private readonly lastQ = new Quaternion();
   private readonly lastP = new Vector3();
   private restore: Array<() => void> = [];
@@ -388,10 +403,15 @@ export class ThreeNode extends BaseObject {
     // We decide when shadows are redrawn (see `invalidate`), except in `always` mode.
     this.renderer.shadowMap.autoUpdate = opts.render === 'always';
 
+    const gl = this.renderer.getContext();
+    const ext = 'createQuery' in gl ? gl.getExtension('EXT_disjoint_timer_query_webgl2') : null;
+    if (ext) this.timer = { gl: gl as WebGL2RenderingContext, ext, queries: [] };
+
     this.camera = new PerspectiveCamera(opts.fov ?? 45, w / h, 0.05, 500);
-    // The floor is in real pixels: never below 0.75 per CSS pixel. On a 2x phone that is half
-    // resolution and looks fine; on a 1x laptop, half would be visibly soft.
-    this.governor = new ResolutionGovernor(Math.min(1, Math.max(0.5, 0.75 / this.baseRatio())));
+    // The floor is in real pixels: by default never below 0.75 per CSS pixel. On a 2x phone that
+    // is half resolution and looks fine; on a 1x laptop, half would be visibly soft.
+    const floor = opts.minResolution ?? 0.75;
+    this.governor = new ResolutionGovernor(Math.min(1, Math.max(opts.minResolution ? 0.1 : 0.5, floor / this.baseRatio())));
   }
 
   override onMount(scene: SceneLike): void {
@@ -448,6 +468,25 @@ export class ThreeNode extends BaseObject {
    * Ask for a frame. `world`: something in the scene changed (shadows are
    * redrawn too). `view`: only the camera, a colour or a light's brightness did.
    */
+  /**
+   * Code-driven motion (a drag, a wheel, a key) that isn't OrbitControls: draw a frame now, at the
+   * resolution floor, and keep that resolution until `ms` after the last call; then one sharp frame.
+   * Input renders in bursts, so the governor, which needs a run of frames to judge, never sees it.
+   */
+  /**
+   * The last drawn frame's cost in ms: measured GPU time where the browser has timer queries (a
+   * frame or two late), else how long it held up the next frame. For work that adapts to the device
+   * (an iteration budget, a sample count). Changes only when a new measurement arrives.
+   */
+  get frameCost(): number {
+    return this.lastCost;
+  }
+
+  moving(ms = 200): void {
+    this.movingUntil = performance.now() + ms;
+    this.invalidate('view');
+  }
+
   invalidate(what: 'world' | 'view' = 'world'): void {
     this.needsRender = true;
     if (what === 'world') this.needsShadows = true;
@@ -477,6 +516,17 @@ export class ThreeNode extends BaseObject {
 
   override onUpdate(dt: number, elapsed: number): void {
     super.onUpdate(dt, elapsed);
+    if (this.drawnAt) {
+      if (!this.timer) this.lastCost = performance.now() - this.drawnAt;
+      this.drawnAt = 0;
+    }
+    // Timer results arrive a frame or two late; a disjoint (clock reset) one is discarded.
+    const t = this.timer;
+    while (t?.queries[0] && t.gl.getQueryParameter(t.queries[0], t.gl.QUERY_RESULT_AVAILABLE)) {
+      const q = t.queries.shift()!;
+      if (!t.gl.getParameter(t.ext.GPU_DISJOINT_EXT)) this.lastCost = t.gl.getQueryParameter(q, t.gl.QUERY_RESULT) / 1e6;
+      t.gl.deleteQuery(q);
+    }
     for (const fn of this.frames) if (fn(dt, elapsed) === true) this.invalidate('world');
     if (!this.onScreen) return;
     this.fit();
@@ -496,23 +546,40 @@ export class ThreeNode extends BaseObject {
       const busy = this.streak >= 2 && !crawl;
       if (busy && this.streak > 2) this.governor.sample(now - this.lastRender);
       const auto = (this.opts.quality ?? 'auto') !== 'high';
-      this.drawFrame(busy && auto ? this.governor.scale : 1);
+      const moving = auto && now < this.movingUntil;
+      this.drawFrame(moving ? this.governor.min : busy && auto ? this.governor.scale : 1);
       this.lastRender = now;
       this.streak++;
     } else {
       this.streak = 0;
-      // Settled after a burst of reduced-resolution frames: one sharp frame.
-      if (this.lowRes && performance.now() - this.lastRender > SETTLE_MS) this.drawFrame(1);
+      // Settled after reduced-resolution frames: sharpen in steps, each only if the last frame's
+      // cost, scaled by the pixels the step adds, stays affordable. Cheap views reach full
+      // resolution in a few frames; one whose sharp frame would take seconds (a deep fractal)
+      // stops short instead of tripping the GPU watchdog, which kills the context.
+      if (this.lowRes && performance.now() - this.lastRender > SETTLE_MS) {
+        const next = Math.min(1, this.drawnScale * 1.6);
+        if (this.lastCost * (next / this.drawnScale) ** 2 <= SHARPEN_MS) this.drawFrame(next);
+        else this.lowRes = false; // as sharp as this view affords
+      }
     }
   }
 
   private drawFrame(scale: number): void {
     this.applyRatio(scale);
     if (this.opts.render !== 'always') this.renderer.shadowMap.needsUpdate = this.needsShadows;
+    const t = this.timer;
+    const q = t && t.queries.length < 4 ? t.gl.createQuery() : null;
+    if (q) t!.gl.beginQuery(t!.ext.TIME_ELAPSED_EXT, q);
     this.renderer.render(this.world, this.camera);
+    if (q) {
+      t!.gl.endQuery(t!.ext.TIME_ELAPSED_EXT);
+      t!.queries.push(q);
+    }
     this.needsRender = false;
     this.needsShadows = false;
     this.lowRes = scale < 1;
+    this.drawnScale = scale;
+    this.drawnAt = performance.now();
   }
 
   private baseRatio(): number {
