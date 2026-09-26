@@ -82,7 +82,9 @@ export type AnimatedValues = Partial<Record<AnimatableProp, number>>;
 
 /**
  * Compile an `animate` block once (sorting its segments), and get back the
- * function to call every frame.
+ * function to call every frame. It returns the same object each call,
+ * overwritten: read it before the next call, don't keep it. One allocation per
+ * node instead of one per node per frame.
  */
 export function compileAnimate(
   spec: AnimateSpec,
@@ -94,9 +96,9 @@ export function compileAnimate(
     return [[prop, [...segs].sort((a, b) => a.at - b.at)] as const];
   });
 
+  const out: AnimatedValues = {};
   return (t) => {
     const lt = localTime(t, spec.loop);
-    const out: AnimatedValues = {};
     for (const [prop, segs] of tracks) {
       out[prop] = sampleSegments(segs, lt, initial[prop] ?? (prop === 'scale' || prop === 'opacity' ? 1 : 0));
     }

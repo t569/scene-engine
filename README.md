@@ -49,7 +49,7 @@ banner.start();
 
 A looping ad: the headline pops in, the underline draws itself, the badge
 responds to hover. None of it is code you wrote. Open [`demo.html`](demo.html)
-for five live examples (presets, an ad, a scrubbed choreography, a 3D Klein
+for live examples (presets, an ad, a scrubbed choreography, a 3D Klein
 bottle, a character).
 
 ## Install
@@ -86,7 +86,7 @@ interface SceneSpec {
 
 **Every node** takes `id?`, `x?`, `y?`, `scale?`, `rotation?` (degrees),
 `opacity?`, the presets `draggable?` and `hover_scale?`, `animate?`, and the
-interactive `bind?`, `control?` and `visible_when?`. A scene may declare `params`.
+interactive `bind?`, `control?`, `visible_when?`, `on_click?` and `fill_by?`. A scene may declare `params`.
 
 | `type` | Fields |
 |---|---|
@@ -181,6 +181,8 @@ depends on it answers at once. All of it is data.
 | `control` | Turns any node into a handle: its position *is* a param, and dragging it sets the param, so the param's range and step constrain the drag. |
 | Templates | Text with `{expr}` or `{expr:digits}` holes updates live: `"period = {2*pi/b:2} s"`. |
 | `visible_when` | Show a node only while `min ≤ expr ≤ max` (all conditions, if a list): goals, hints, step-by-step reveals. |
+| `on_click` | `{ "set": { "style": 2 } }`: a click, Enter or Space sets params. Swatches, tabs, "next step" buttons. |
+| `fill_by` | `{ "param": "body", "palette": ["#fff", "#111"] }`: fill is `palette[round(param)]`. A colour that follows a choice. |
 
 **Why a parser and not `eval`.** A spec may be written by a model or a
 stranger. Formulas go through a small hand-written parser that knows only
@@ -307,6 +309,93 @@ graph.fit();                      // everything in view
 `stepForces`, `spiralLayout`, `neighbours` and `zoomAt` are exported pure.
 The one node that doesn't seek: a force layout integrates, so its state at
 `t` depends on every frame before it.
+
+### `@t569/scene-engine/three`
+
+WebGL scenes on three.js, for what SVG can't carry: imported models with
+thousands of triangles, real lights, soft shadows. `three` is a peer
+dependency of this entry only; the core stays dependency-free. Importing it
+registers the `scene3d` node type.
+
+**As data.** A 3D scene in a `SceneSpec`, validated like everything else, and
+driven by the same params as the 2D nodes around it:
+
+```jsonc
+{
+  "width": 1000, "height": 640,
+  "params": { "way": { "value": 0, "min": 0, "max": 2, "step": 1 }, "spin": { "value": 0, "min": -180, "max": 180 } },
+  "objects": [
+    {
+      "type": "scene3d", "x": 500, "y": 300, "width": 1000, "height": 600,
+      "camera": { "position": [2.6, 1.7, 3.2], "target": [0, 0.5, 0] },
+      "orbit": { "maxPolarAngle": 88 },
+      "lights": [{ "type": "directional", "position": [3, 6, 4], "castShadow": true }],
+      "objects": [
+        { "type": "model", "src": "models/shoe.glb", "fit": 1.5,
+          "variant_by": { "param": "way", "variants": ["street", "midnight", "beach"] },
+          "bind": { "rotation.y": "spin" } },
+        { "type": "cylinder", "radiusTop": 0.9, "radiusBottom": 0.95, "height": 0.3,
+          "material": { "color_by": { "param": "way", "palette": ["#eee", "#223", "#c96"] } } }
+      ]
+    },
+    { "type": "circle", "x": 140, "y": 612, "radius": 12, "fill": "#2f6aa3", "on_click": { "set": { "way": 1 } } },
+    { "type": "slider", "param": "spin", "x": 640, "y": 618, "width": 200 }
+  ]
+}
+```
+
+| `scene3d` field | |
+|---|---|
+| `camera` | `position`, `target` ([x, y, z]), `fov` |
+| `orbit` | `true` (default), `false`, or `autoRotate`, `min/maxDistance`, `min/maxPolarAngle` (degrees), `pan`, `zoom` |
+| `environment` | `{ preset: 'studio' \| 'none', intensity }`: soft image-based light, default studio |
+| `shadows` | `soft` (default), `sharp`, `none`; `floor: { shadow, size }` or `false` |
+| `lights` | ≤ 16 of `directional`, `point`, `spot`, `ambient`, `hemisphere`; ≤ 4 cast shadows; `bind` (`intensity`, `position.*`), `visible_when` |
+| `objects` | ≤ 500 of `model`, `box` (`radius` rounds it), `sphere`, `cylinder`, `plane`, `torus`, `group` (`merge: true` for static detail) |
+| per object | `position`, `rotation` (degrees), `scale`, `castShadow`, `receiveShadow`, `bind` (`position.*`, `rotation.*`, `scale`), `visible_when`, `on_click` |
+| `model` | `src`, `fit` + `fitAxis`, `center`, `variant`, `variant_by`, `animation` |
+| `material` | `color`, `color_by`, `roughness`, `metalness`, `emissive`, `emissiveIntensity`, `opacity`, `clearcoat`, `transmission`, `flatShading`, `side` |
+| `quality`, `layer`, `render` | `auto`/`high`/`low`; `overlay`/`inline`; `demand`/`always` (see below) |
+
+Model URLs pass through `parseScene(spec, mount, { resolveAsset })`; without
+one, only same-origin and relative URLs load, so a spec from a stranger can't
+make the viewer's browser call other servers.
+
+**By code.** `ThreeNode` is the viewport; build the world with three.js:
+
+```ts
+import { ThreeNode } from '@t569/scene-engine/three';
+
+const view = scene.add(new ThreeNode({ x: 500, y: 320, width: 1000, height: 640, shadows: 'soft' }));
+view.world.add(myMesh);
+view.camera.position.set(6, 5, 8);
+const controls = view.orbit([0, 0.5, 0]);        // wired to draw on demand
+view.world.add(await view.loadModel('/m/chair.glb'));
+view.invalidate();                                // you changed the world: draw a frame
+view.onFrame((dt) => { spinner.rotation.y += dt; return true; }); // true = I moved something
+```
+
+**Speed**, for phones and laptops first:
+
+- **Draws on demand.** An idle viewer renders nothing. `invalidate('world')`
+  after moving things (shadows redrawn), `invalidate('view')` after a colour or
+  camera change (shadows reused). Controls, resizes and `scene3d` bindings do it
+  for you. `render: 'always'` opts out.
+- **Adaptive resolution** (`quality: 'auto'`): renders fewer pixels while frames
+  come back slow, never below 0.75 real pixels per CSS pixel, and draws one sharp
+  frame as soon as motion settles.
+- **Fewer draw calls.** `mergeStatic(part)` merges meshes sharing a material,
+  within a part: less CPU per frame, which matters most on weaker devices.
+- **Compressed models.** Meshopt, KTX2 and Draco glTFs load; each decoder is
+  fetched only when a file needs it. KTX2 and Draco need their decoder files
+  hosted: `configureLoaders({ ktx2TranscoderPath, dracoDecoderPath })` (three
+  ships both under `examples/jsm/libs/`). Parsed models are cached per URL.
+- **Pauses off screen**; frees GPU memory and its WebGL context on destroy.
+
+**Layering.** By default (`layer: 'overlay'`) the canvas sits under the SVG
+and every SVG node draws on top of the 3D view: labels, hotspots and controls
+over a product. It measured smoother than a canvas inside the SVG. Use
+`layer: 'inline'` when an SVG node must sit *under* the 3D view in array order.
 
 ### `@t569/scene-engine/dicebear`
 

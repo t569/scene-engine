@@ -11,7 +11,7 @@
  */
 import { BaseObject, SETTLE_RATE, approach, capturePointer, toSceneCoords } from './objects.ts';
 import { SVG_NS } from './scene.ts';
-import type { Compiled, Env } from './expr.ts';
+import { usesTime, type Compiled, type Env } from './expr.ts';
 import type { BaseNodeSpec } from './types.ts';
 
 /* ------------------------------------------------------------- live text */
@@ -19,6 +19,8 @@ import type { BaseNodeSpec } from './types.ts';
 /** A text node whose content is a template: `"a = {a:2}"`. Updates when the value does. */
 export class TemplateText extends BaseObject {
   private last = '';
+  /** Params version last rendered at; a template without `t` only changes with a param. */
+  private seen = -1;
 
   constructor(
     private readonly textEl: SVGTextElement,
@@ -30,6 +32,9 @@ export class TemplateText extends BaseObject {
 
   override onUpdate(dt: number, elapsed: number): void {
     super.onUpdate(dt, elapsed);
+    const version = this.scene?.params.version ?? 0;
+    if (version === this.seen && !usesTime(this.render)) return;
+    this.seen = version;
     const next = this.render(this.envAt(elapsed));
     if (next !== this.last) {
       this.textEl.textContent = next;
@@ -165,6 +170,7 @@ export class SliderNode extends BaseObject {
   private readonly knob: SVGCircleElement;
   private readonly labelEl: SVGTextElement | null;
   private lastLabel = '';
+  private labelSeen = -1;
   /** Knob position along the track, drawn; eased toward `knobTarget` unless held. */
   private knobX = Number.NaN;
   /** Pointer position while dragging — the knob follows it exactly, between steps too. */
@@ -279,7 +285,9 @@ export class SliderNode extends BaseObject {
       // Close enough is there: stop writing attributes once settled.
       this.drawKnob(Math.abs(next - target) < 0.05 ? target : next);
     }
-    if (this.label && this.labelEl) {
+    const version = this.scene.params.version;
+    if (this.label && this.labelEl && (version !== this.labelSeen || usesTime(this.label))) {
+      this.labelSeen = version;
       const text = this.label(this.envAt(elapsed));
       if (text !== this.lastLabel) {
         this.labelEl.textContent = text;

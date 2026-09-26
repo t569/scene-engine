@@ -1,6 +1,6 @@
 {
   "name": "@t569/scene-engine",
-  "version": "0.4.0",
+  "version": "0.6.0",
   "description": "SVG-first scene graph for the web: declarative JSON scenes, one master clock, interaction presets, plugins. Zero runtime dependencies.",
   "license": "MIT",
   "author": "t569",
@@ -34,6 +34,10 @@
     "./graph": {
       "types": "./dist/plugins/graph.d.ts",
       "import": "./dist/plugins/graph.js"
+    },
+    "./three": {
+      "types": "./dist/plugins/three.d.ts",
+      "import": "./dist/plugins/three.js"
     }
   },
   "files": [
@@ -41,11 +45,22 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "prepare": "npm run build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "devDependencies": {
+    "@types/three": "^0.186.0",
+    "three": "^0.186.1",
     "typescript": "^6.0.3",
     "vitest": "^3.2.4"
+  },
+  "peerDependencies": {
+    "three": ">=0.180.0"
+  },
+  "peerDependenciesMeta": {
+    "three": {
+      "optional": true
+    }
   }
 }

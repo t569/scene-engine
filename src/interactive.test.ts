@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ExprError, compile, compileTemplate } from './expr.ts';
+import { ExprError, compile, compileTemplate, usesTime } from './expr.ts';
 import { Params } from './params.ts';
 import { plotPath, sliderValueAt } from './interactive.ts';
 import { SceneSpecError, validateSceneSpec } from './parse.ts';
@@ -59,6 +59,15 @@ describe('expressions', () => {
     const t = compileTemplate('a = {a:2}, twice = {2*a}, done', ['a']);
     expect(t({ a: 1.5 })).toBe('a = 1.50, twice = 3, done');
     expect(compileTemplate('{1/a}', ['a'])({ a: 0 })).toBe('—');
+  });
+});
+
+describe('usesTime', () => {
+  it('flags only expressions and templates that read t', () => {
+    expect(usesTime(compile('90*sin(t)', ['t']))).toBe(true);
+    expect(usesTime(compile('sqrt(a) + tan(a)', ['a', 't']))).toBe(false); // letters, not the variable
+    expect(usesTime(compileTemplate('a = {a:2}', ['a', 't']))).toBe(false);
+    expect(usesTime(compileTemplate('a = {a:2}, t = {t:1}', ['a', 't']))).toBe(true);
   });
 });
 
@@ -142,6 +151,15 @@ describe('validating an interactive spec', () => {
     bad([{ type: 'circle', radius: 1, control: { x: { param: 't', range: [0, 1] } } }], /must name one of scene.params/);
     bad([], /not a built-in/, { params: { sin: { value: 1 } } });
     bad([], /min is above max/, { params: { a: { value: 1, min: 5, max: 1 } } });
+  });
+
+  it('checks buttons and palettes against the params, and keeps colours inert', () => {
+    const ok = { type: 'rect', width: 1, height: 1, on_click: { set: { a: 2 } }, fill_by: { param: 'a', palette: ['#fff', 'rgb(1, 2, 3)'] } };
+    expect(() => validateSceneSpec({ ...base, objects: [ok] })).not.toThrow();
+    bad([{ ...ok, on_click: { set: { b: 1 } } }], /on_click\.set\.b must name one of scene.params/);
+    bad([{ ...ok, on_click: { set: { a: 'x' } } }], /on_click\.set\.a must be a number/);
+    bad([{ ...ok, fill_by: { param: 'a', palette: [] } }], /fill_by\.palette/);
+    bad([{ ...ok, fill_by: { param: 'a', palette: ['red" onload="x'] } }], /fill_by\.palette/);
   });
 
   it('keeps plots bounded', () => {

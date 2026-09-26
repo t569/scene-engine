@@ -20,6 +20,7 @@ export {
   toSceneCoords,
 } from './objects.ts';
 export { createObject, type BuildOptions } from './factory.ts';
+export { registerNodeType, type NodeTypeDef, type SpecContext, type BuildContext } from './registry.ts';
 export { parseScene, validateSceneSpec, SceneSpecError, LIMITS } from './parse.ts';
 export { EASES, ANIMATABLE, compileAnimate, sampleSegments, localTime, type AnimatedValues } from './timeline.ts';
 export {
@@ -51,6 +52,7 @@ export type {
   EaseName,
   Lifecycle,
   NodeSpec,
+  NodeTypeMap,
   PathSpec,
   PolylineSpec,
   RectSpec,
@@ -67,7 +69,7 @@ export type {
 } from './types.ts';
 
 /* The interactive layer (0.3): params, a safe expression language, live nodes. */
-export { compile, compileTemplate, isTemplate, isReservedName, ExprError, EXPR_LIMITS, type Compiled, type Env } from './expr.ts';
+export { compile, compileTemplate, isTemplate, usesTime, isReservedName, ExprError, EXPR_LIMITS, type Compiled, type Env } from './expr.ts';
 export { Params, type ParamSpec } from './params.ts';
 export {
   PlotNode,

@@ -4,6 +4,7 @@ import { createObject, type BuildOptions } from './factory.ts';
 import { SHAPES } from './space.ts';
 import { ANIMATABLE, EASES } from './timeline.ts';
 import { ExprError, compile, compileTemplate, isReservedName } from './expr.ts';
+import { nodeType, registeredTypes, type SpecContext } from './registry.ts';
 import type { AssetSpec, NodeSpec, SceneSpec } from './types.ts';
 
 /**
@@ -19,7 +20,11 @@ export const LIMITS = {
   items3d: 32,
   params: 32,
   plotSamples: 2000,
+  palette: 64,
 } as const;
+
+/** A CSS colour: hex, a name, or rgb()/hsl(). Nothing that could end an attribute. */
+const COLOR = /^[#\w(),.%\s-]{1,64}$/;
 
 export class SceneSpecError extends Error {
   constructor(message: string) {
@@ -155,6 +160,28 @@ function validateInteractive(node: Record<string, unknown>, at: string): void {
       if (c.min !== undefined && !num(c.min)) throw new SceneSpecError(`${cat}.min must be a number`);
       if (c.max !== undefined && !num(c.max)) throw new SceneSpecError(`${cat}.max must be a number`);
     });
+  }
+  if (node.on_click !== undefined) {
+    if (!isRecord(node.on_click) || !isRecord(node.on_click.set)) {
+      throw new SceneSpecError(`${at}.on_click must be { set: { param: value } }`);
+    }
+    for (const [name, v] of Object.entries(node.on_click.set)) {
+      checkParamRef(name, `${at}.on_click.set.${name}`);
+      if (!num(v)) throw new SceneSpecError(`${at}.on_click.set.${name} must be a number`);
+    }
+  }
+  if (node.fill_by !== undefined) {
+    const f = node.fill_by;
+    if (!isRecord(f)) throw new SceneSpecError(`${at}.fill_by must be { param, palette }`);
+    checkParamRef(f.param, `${at}.fill_by.param`);
+    if (
+      !Array.isArray(f.palette) ||
+      f.palette.length < 1 ||
+      f.palette.length > LIMITS.palette ||
+      !f.palette.every((c) => typeof c === 'string' && COLOR.test(c))
+    ) {
+      throw new SceneSpecError(`${at}.fill_by.palette must be 1 to ${LIMITS.palette} colours`);
+    }
   }
   if (node.control !== undefined) {
     if (!isRecord(node.control)) throw new SceneSpecError(`${at}.control must be { x?, y? }`);
@@ -292,12 +319,26 @@ function validateNode(node: unknown, i: number): void {
         }
       }
       return;
-    default:
-      throw new SceneSpecError(
-        `${at} has unknown type ${JSON.stringify(node.type)} — expected one of rect, circle, text, path, polyline, tex, space3d, plot, slider`,
-      );
+    default: {
+      const ext = nodeType(node.type);
+      if (ext) return ext.validate(node, at, specContext);
+      const known = ['rect', 'circle', 'text', 'path', 'polyline', 'tex', 'space3d', 'plot', 'slider', ...registeredTypes()];
+      throw new SceneSpecError(`${at} has unknown type ${JSON.stringify(node.type)} — expected one of ${known.join(', ')}`);
+    }
   }
 }
+
+/** The core's checks, for plugin validators: same rules, same error type, same trust boundary. */
+const specContext: SpecContext = {
+  checkExpr: (src, at, extra) => checkExpr(src, at, extra),
+  checkParamRef: (name, at) => checkParamRef(name, at),
+  checkColor: (c, at) => {
+    if (typeof c !== 'string' || !COLOR.test(c)) throw new SceneSpecError(`${at} must be a colour (hex, name, rgb() or hsl())`);
+  },
+  fail: (message) => {
+    throw new SceneSpecError(message);
+  },
+};
 
 /**
  * Fonts declared in `assets` become one `<style>` block inside the scene's own

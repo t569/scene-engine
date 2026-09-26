@@ -57,6 +57,19 @@ export interface BaseNodeSpec {
   control?: { x?: ControlAxis; y?: ControlAxis };
 
   /**
+   * Make the node a button: a click (or Enter/Space) sets these params. The
+   * swatch, the tab, the "next step" — anything that picks rather than drags.
+   */
+  on_click?: { set: Record<string, number> };
+
+  /**
+   * Fill from a param: `palette[round(param)]`, clamped to the palette. How a
+   * colour follows a choice, since params are numbers and colours are not.
+   * Ignored by nodes without a fill of their own (plot, slider, tex, space3d).
+   */
+  fill_by?: FillBy;
+
+  /**
    * Keyframed properties, as data. Each property gets its own list of segments;
    * the value at time `t` is a pure function of `t`, so `scene.seek(t)` lands
    * every animated node exactly where it would have been. See `timeline.ts`.
@@ -69,6 +82,11 @@ export interface VisibleWhen {
   expr: string;
   min?: number;
   max?: number;
+}
+
+export interface FillBy {
+  param: string;
+  palette: string[];
 }
 
 /** One axis of a handle: which param, and where its min and max sit in scene units. */
@@ -251,16 +269,24 @@ export interface SliderSpec extends BaseNodeSpec {
   textColor?: string;
 }
 
-export type NodeSpec =
-  | RectSpec
-  | CircleSpec
-  | TextSpec
-  | PathSpec
-  | PolylineSpec
-  | TexSpec
-  | Space3DSpec
-  | PlotSpec
-  | SliderSpec;
+/**
+ * Every node spec, by `type`. Plugins add theirs by module augmentation
+ * (`declare module '@t569/scene-engine' { interface NodeTypeMap { … } }`)
+ * and register a validator and builder with `registerNodeType`.
+ */
+export interface NodeTypeMap {
+  rect: RectSpec;
+  circle: CircleSpec;
+  text: TextSpec;
+  path: PathSpec;
+  polyline: PolylineSpec;
+  tex: TexSpec;
+  space3d: Space3DSpec;
+  plot: PlotSpec;
+  slider: SliderSpec;
+}
+
+export type NodeSpec = NodeTypeMap[keyof NodeTypeMap];
 
 /**
  * Heavy things are declared once, up here, and referenced by `asset_id` from
