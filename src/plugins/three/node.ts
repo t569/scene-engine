@@ -76,6 +76,20 @@ export interface ThreeOptions extends BaseNodeSpec {
    * all fill rate and motion hides the softness; the settled frame is always sharp.
    */
   minResolution?: number;
+  /**
+   * Glow: bright parts bleed light (three's UnrealBloomPass). The post-processing code is
+   * imported only when this is set, so scenes without it pay nothing; until it arrives,
+   * frames draw plainly. `threshold` is the luminance (0–1) above which things glow.
+   */
+  bloom?: { strength?: number; radius?: number; threshold?: number };
+}
+
+/** The part of three's EffectComposer this node uses. */
+interface Composer {
+  render(): void;
+  setPixelRatio(r: number): void;
+  setSize(w: number, h: number): void;
+  dispose(): void;
 }
 
 export type FrameFn = (dt: number, elapsed: number) => boolean | void;
@@ -361,6 +375,9 @@ export class ThreeNode extends BaseObject {
   private restore: Array<() => void> = [];
   private backdrop: HTMLDivElement | null = null;
   private backdropAt = '';
+  private composer: Composer | null = null;
+  /** Set on destroy: an import that lands afterwards must not touch the lost context. */
+  private destroyed = false;
 
   constructor(private readonly opts: ThreeOptions) {
     const g = document.createElementNS(SVG_NS, 'g');
@@ -412,6 +429,33 @@ export class ThreeNode extends BaseObject {
     // is half resolution and looks fine; on a 1x laptop, half would be visibly soft.
     const floor = opts.minResolution ?? 0.75;
     this.governor = new ResolutionGovernor(Math.min(1, Math.max(opts.minResolution ? 0.1 : 0.5, floor / this.baseRatio())));
+    if (opts.bloom) void this.loadBloom(opts.bloom);
+  }
+
+  private async loadBloom({ strength = 0.8, radius = 0.4, threshold = 0.6 }: NonNullable<ThreeOptions['bloom']>): Promise<void> {
+    const [{ EffectComposer }, { RenderPass }, { UnrealBloomPass }, { OutputPass }] = await Promise.all([
+      import('three/addons/postprocessing/EffectComposer.js'),
+      import('three/addons/postprocessing/RenderPass.js'),
+      import('three/addons/postprocessing/UnrealBloomPass.js'),
+      import('three/addons/postprocessing/OutputPass.js'),
+    ]);
+    if (this.destroyed) return;
+    const composer = new EffectComposer(this.renderer);
+    const bloom = new UnrealBloomPass(new Vector2(1, 1), strength, radius, threshold);
+    composer.addPass(new RenderPass(this.world, this.camera));
+    composer.addPass(bloom);
+    composer.addPass(new OutputPass()); // tone mapping and sRGB happen here, after the glow
+    this.composer = {
+      render: () => composer.render(),
+      setPixelRatio: (r) => composer.setPixelRatio(r),
+      setSize: (w, h) => composer.setSize(w, h),
+      dispose: () => {
+        bloom.dispose();
+        composer.dispose();
+      },
+    };
+    this.ratio = 0; // size the composer on the next frame
+    this.invalidate('view');
   }
 
   override onMount(scene: SceneLike): void {
@@ -570,7 +614,8 @@ export class ThreeNode extends BaseObject {
     const t = this.timer;
     const q = t && t.queries.length < 4 ? t.gl.createQuery() : null;
     if (q) t!.gl.beginQuery(t!.ext.TIME_ELAPSED_EXT, q);
-    this.renderer.render(this.world, this.camera);
+    if (this.composer) this.composer.render();
+    else this.renderer.render(this.world, this.camera);
     if (q) {
       t!.gl.endQuery(t!.ext.TIME_ELAPSED_EXT);
       t!.queries.push(q);
@@ -593,6 +638,8 @@ export class ThreeNode extends BaseObject {
     this.ratio = ratio;
     this.renderer.setPixelRatio(ratio);
     this.renderer.setSize(this.cssSize.w, this.cssSize.h, false);
+    this.composer?.setPixelRatio(ratio);
+    this.composer?.setSize(this.cssSize.w, this.cssSize.h);
   }
 
   /**
@@ -673,9 +720,11 @@ export class ThreeNode extends BaseObject {
   }
 
   override onDestroy(): void {
+    this.destroyed = true;
     this.frames.clear();
     this.observer?.disconnect();
     this.orbitControls?.dispose();
+    this.composer?.dispose();
     disposeObject(this.world);
     this.world.environment?.dispose();
     this.renderer.dispose();
