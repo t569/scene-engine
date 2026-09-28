@@ -202,7 +202,7 @@ export interface TexSpec extends BaseNodeSpec {
 
 /** One thing in a 3D space, named rather than written as a formula — see `space.ts`. */
 export interface Space3DItemSpec {
-  /** A built-in surface (`klein8`, `torus`, …) or curve (`helix`, `torusKnot`, …). */
+  /** A built-in surface (`klein8`, `torus`, …), curve (`helix`, `torusKnot`, …) or polyhedron (`cube`, …). */
   shape: string;
   params?: Record<string, number>;
   /** Grid resolution: [u steps, v steps] for a surface, [samples] for a curve. */

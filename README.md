@@ -138,7 +138,9 @@ The last two go out and come back, the shape of a pulse or a shake. `smooth`,
 ```
 
 Surfaces: `klein8`, `torus`, `sphere`, `mobius`. Curves: `helix`, `torusKnot`,
-`lissajous`. All items share one camera and are depth-sorted together, so a
+`lissajous`. Polyhedra (edges only): `tetrahedron`, `cube`, `octahedron`,
+`cuboctahedron`, `icosahedron`, `dodecahedron`, params `size` (circumradius,
+default 2) and `sx`/`sy`/`sz` to stretch an axis; `draw` reveals the edges. All items share one camera and are depth-sorted together, so a
 curve can pass behind a surface and out again. Omit `distance` for
 orthographic. `steps` sets resolution. Shapes are named, not formula strings,
 because a spec may come from a model and a formula string would be code. In

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { EASES, compileAnimate, localTime, sampleSegments } from './timeline.ts';
-import { bandByDepth, buildPrimitives, itemFromSpec, project, type Primitive } from './space.ts';
+import { SHAPES, bandByDepth, buildPrimitives, itemFromSpec, project, solidEdges, type Primitive } from './space.ts';
 import { SceneSpecError, validateSceneSpec, LIMITS } from './parse.ts';
 import { EMOTIONS, STILL, easeMotion, pose } from './plugins/character.ts';
 import type { EaseName, Segment } from './types.ts';
@@ -104,6 +104,15 @@ describe('3D primitives', () => {
     const maxDepth = (b: Primitive[]) => Math.max(...b.map((p) => p.depth));
     expect(maxDepth(bands[0]!)).toBeGreaterThan(maxDepth(bands[4]!));
     expect(bands.flat()).toHaveLength(prims.length);
+  });
+
+  it('names the polyhedra by their true vertex and edge counts', () => {
+    const counts = { tetrahedron: [4, 6], cube: [8, 12], octahedron: [6, 12], cuboctahedron: [12, 24], icosahedron: [12, 30], dodecahedron: [20, 30] };
+    for (const [shape, [v, e]] of Object.entries(counts)) {
+      const s = SHAPES[shape] as { vertices: unknown[] };
+      expect([s.vertices.length, solidEdges(s.vertices as never).length], shape).toEqual([v, e]);
+      expect(buildPrimitives([itemFromSpec({ shape })], cam), shape).toHaveLength(e);
+    }
   });
 
   it('refuses a shape it does not know', () => {

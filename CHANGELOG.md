@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `space3d` polyhedra: `tetrahedron`, `cube`, `octahedron`, `cuboctahedron`, `icosahedron`,
+  `dodecahedron`, as named shapes a spec can use. Edges are derived (vertex pairs at the shortest
+  distance), drawn as a new `EdgesItem`, depth-faded like any line.
 - `ThreeNode` `minResolution`: the adaptive-resolution floor, for fill-bound shaders (a deep-zoom
   fractal on a full-screen quad) that want to drop further while moving. Default unchanged, 0.75.
 - `ThreeNode.moving(ms)`: code-driven input (drag, wheel, keys) draws at the resolution floor

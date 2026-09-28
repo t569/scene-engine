@@ -74,7 +74,48 @@ interface CurveShape {
   steps: [number];
 }
 
+/** A polyhedron: vertices only. Edges are the vertex pairs at the shortest distance. */
+interface SolidShape {
+  kind: 'solid';
+  vertices: Vec3[];
+  defaults: Params;
+}
+
 const TAU = Math.PI * 2;
+const PHI = (1 + Math.sqrt(5)) / 2;
+
+/** Every sign combination of the non-zero coordinates, then every cyclic rotation. */
+function cyclic(...bases: Vec3[]): Vec3[] {
+  const out: Vec3[] = [];
+  for (const [a, b, c] of bases) {
+    for (const sa of a ? [1, -1] : [1]) {
+      for (const sb of b ? [1, -1] : [1]) {
+        for (const sc of c ? [1, -1] : [1]) {
+          const [x, y, z] = [a * sa, b * sb, c * sc];
+          out.push([x, y, z], [y, z, x], [z, x, y]);
+        }
+      }
+    }
+  }
+  // (1,1,1) is its own rotation.
+  return out.filter((v, i) => out.findIndex((w) => w.every((n, k) => n === v[k])) === i);
+}
+
+const solid = (vertices: Vec3[]): SolidShape => ({ kind: 'solid', vertices, defaults: { size: 2, sx: 1, sy: 1, sz: 1 } });
+
+/** Vertex index pairs at the shortest distance: the edges of any uniform polyhedron. */
+export function solidEdges(vertices: readonly Vec3[]): Array<[number, number]> {
+  const d = (a: Vec3, b: Vec3) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+  let min = Infinity;
+  for (let i = 0; i < vertices.length; i++) {
+    for (let j = i + 1; j < vertices.length; j++) min = Math.min(min, d(vertices[i]!, vertices[j]!));
+  }
+  const out: Array<[number, number]> = [];
+  for (let i = 0; i < vertices.length; i++) {
+    for (let j = i + 1; j < vertices.length; j++) if (d(vertices[i]!, vertices[j]!) < min * 1.001) out.push([i, j]);
+  }
+  return out;
+}
 
 /**
  * The shapes a JSON spec can name.
@@ -84,7 +125,17 @@ const TAU = Math.PI * 2;
  * execution. A name plus numeric params is inert data. Code callers are not
  * limited to these — `Space3D.add` takes any function.
  */
-export const SHAPES: Record<string, SurfaceShape | CurveShape> = {
+export const SHAPES: Record<string, SurfaceShape | CurveShape | SolidShape> = {
+  /* Polyhedra, all scaled to circumradius √3 before `size`: `sx`/`sy`/`sz` stretch one axis. */
+  tetrahedron: solid([[1, 1, 1], [1, -1, -1], [-1, 1, -1], [-1, -1, 1]]),
+  cube: solid(cyclic([1, 1, 1])),
+  octahedron: solid(cyclic([Math.sqrt(3), 0, 0])),
+  cuboctahedron: solid(cyclic([Math.sqrt(1.5), Math.sqrt(1.5), 0])),
+  icosahedron: solid(cyclic([0, 1, PHI]).map(([x, y, z]): Vec3 => {
+    const s = Math.sqrt(3) / Math.hypot(1, PHI);
+    return [x * s, y * s, z * s];
+  })),
+  dodecahedron: solid(cyclic([1, 1, 1], [0, 1 / PHI, PHI])),
   /** The figure-8 immersion of the Klein bottle: fix u and the section is a lemniscate. */
   klein8: {
     kind: 'surface',
@@ -199,7 +250,14 @@ export interface CurveItem extends Style {
   draw: number;
 }
 
-export type SpaceItem = SurfaceItem | CurveItem;
+/** Straight segments, e.g. a polyhedron's edges. `draw` is the fraction of them shown, in order. */
+export interface EdgesItem extends Style {
+  kind: 'edges';
+  edges: Array<[Vec3, Vec3]>;
+  draw: number;
+}
+
+export type SpaceItem = SurfaceItem | CurveItem | EdgesItem;
 
 /** A named shape from a spec → a drawable item. Throws on an unknown name. */
 export function itemFromSpec(spec: Space3DItemSpec): SpaceItem {
@@ -209,6 +267,12 @@ export function itemFromSpec(spec: Space3DItemSpec): SpaceItem {
   const stroke = spec.stroke ?? 'currentColor';
   const strokeWidth = spec.strokeWidth ?? 1;
 
+  if (shape.kind === 'solid') {
+    const { size = 2, sx = 1, sy = 1, sz = 1 } = p;
+    const k = size / Math.sqrt(3);
+    const v = shape.vertices.map(([x, y, z]): Vec3 => [x * k * sx, y * k * sy, z * k * sz]);
+    return { kind: 'edges', edges: solidEdges(shape.vertices).map(([a, b]) => [v[a]!, v[b]!]), stroke, strokeWidth, draw: 1 };
+  }
   if (shape.kind === 'surface') {
     return {
       kind: 'surface',
@@ -253,6 +317,14 @@ export function buildPrimitives(items: readonly SpaceItem[], cam: Camera): Primi
   const out: Primitive[] = [];
 
   items.forEach((item, index) => {
+    if (item.kind === 'edges') {
+      const n = Math.round(item.edges.length * Math.min(1, Math.max(0, item.draw)));
+      for (const [a, b] of item.edges.slice(0, n)) {
+        const [p, q] = [project(a, cam), project(b, cam)];
+        out.push({ item: index, kind: 'line', pts: [[p[0], p[1]], [q[0], q[1]]], depth: (p[2] + q[2]) / 2 });
+      }
+      return;
+    }
     if (item.kind === 'curve') {
       const n = Math.max(1, Math.round(item.steps * Math.min(1, Math.max(0, item.draw))));
       let prev = project(item.f(item.t[0]), cam);
@@ -451,7 +523,7 @@ export class Space3D extends BaseObject {
   render(): void {
     const c = this.camera;
     const key = `${c.yaw}|${c.pitch}|${c.zoom}|${c.distance}|${this.items
-      .map((it) => (it.kind === 'curve' ? it.draw : `${it.reveal},${it.highlight}`))
+      .map((it) => (it.kind === 'surface' ? `${it.reveal},${it.highlight}` : it.draw))
       .join(';')}`;
     if (key === this.lastKey) return;
     this.lastKey = key;
