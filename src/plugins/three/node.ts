@@ -512,7 +512,10 @@ export class ThreeNode extends BaseObject {
     if (typeof IntersectionObserver !== 'undefined') {
       this.observer = new IntersectionObserver(([e]) => {
         this.onScreen = e?.isIntersecting ?? true;
-        if (this.onScreen) this.needsRender = true;
+        if (!this.onScreen) return;
+        this.needsRender = true;
+        // A stopped scene that mounted off screen skipped its one frame; nothing would draw it now.
+        this.repaint();
       });
       this.observer.observe(this.canvas);
     }
