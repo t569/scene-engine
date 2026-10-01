@@ -8,6 +8,7 @@
  * light's brightness redraws the view; a move redraws shadows too.
  */
 import {
+  AdditiveBlending,
   AmbientLight,
   AnimationMixer,
   BoxGeometry,
@@ -17,6 +18,8 @@ import {
   CylinderGeometry,
   DirectionalLight,
   BackSide,
+  BufferAttribute,
+  BufferGeometry,
   DoubleSide,
   FrontSide,
   Group,
@@ -29,12 +32,13 @@ import {
   PMREMGenerator,
   PlaneGeometry,
   PointLight,
+  Points,
+  PointsMaterial,
   ShadowMaterial,
   SphereGeometry,
   SpotLight,
   TorusGeometry,
   Vector3,
-  type BufferGeometry,
   type Light,
 } from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
@@ -44,7 +48,7 @@ import { compile, usesTime, type Compiled } from '../../expr.ts';
 import type { BuildContext } from '../../registry.ts';
 import type { VisibleWhen } from '../../types.ts';
 import { ThreeNode, instantiate, loadGLTF, mergeStatic, sameOriginOnly } from './node.ts';
-import type { Light3D, Material3D, Object3DSpec, Scene3DSpec } from './spec.ts';
+import type { Light3D, Material3D, Object3DSpec, ParticlesObject, Scene3DSpec } from './spec.ts';
 
 /** `f` is what's tested; `src` the compiled expression (for `usesTime`). */
 type Condition = { f: Compiled; src: Compiled; min: number; max: number };
@@ -96,6 +100,8 @@ export class Scene3DNode extends ThreeNode {
   /** Objects something drives (bind, visible_when, on_click, color_by): never merged away. */
   private readonly dynamic = new Set<Object3D>();
   private readonly mixers: AnimationMixer[] = [];
+  /** Each particle cloud's clock: its motion is computed on the GPU from this alone. */
+  private readonly clouds: Array<{ value: number }> = [];
   private timed3d = false;
   private seen = -1;
   private hover: { x: number; y: number } | null = null;
@@ -132,7 +138,10 @@ export class Scene3DNode extends ThreeNode {
 
     const loads: Promise<void>[] = [];
     for (const o of spec.objects) this.world.add(this.build(o, loads));
-    this.ready = Promise.all(loads).then(() => this.invalidate('world'));
+    this.ready = Promise.all(loads).then(() => {
+      this.invalidate('world');
+      this.repaint();
+    });
 
     if (spec.orbit !== false) {
       const c = this.orbit(target);
@@ -282,6 +291,9 @@ export class Scene3DNode extends ThreeNode {
       case 'torus':
         obj = mesh(new TorusGeometry(o.radius, o.tube, 24, 64), o.material);
         break;
+      case 'particles':
+        obj = this.particles(o);
+        break;
       case 'group':
         obj = new Group();
         for (const c of o.children) obj.add(this.build(c, loads));
@@ -324,7 +336,7 @@ export class Scene3DNode extends ThreeNode {
     if (o.position) obj.position.set(...o.position);
     if (o.rotation) obj.rotation.set(...(o.rotation.map((d) => MathUtils.degToRad(d)) as [number, number, number]));
     if (o.scale !== undefined) typeof o.scale === 'number' ? obj.scale.setScalar(o.scale) : obj.scale.set(...o.scale);
-    if (o.type !== 'model') this.shadowsOf(obj, o.castShadow ?? true, o.receiveShadow ?? true);
+    if (o.type !== 'model' && o.type !== 'particles') this.shadowsOf(obj, o.castShadow ?? true, o.receiveShadow ?? true);
     if (o.id) obj.name = o.id;
     for (const [key, src] of Object.entries(o.bind ?? {})) {
       if (key === 'scale') {
@@ -347,6 +359,60 @@ export class Scene3DNode extends ThreeNode {
     const driven = o.bind || o.visible_when || o.on_click || ('material' in o && o.material?.color_by);
     if (driven) this.dynamic.add(obj);
     return obj;
+  }
+
+  /**
+   * Each point is stored as (ring radius, height, start angle); the vertex shader turns it to
+   * angle + ω·t, ω falling off with the radius. Seeded, so a still frame is the same every load.
+   */
+  private particles(o: ParticlesObject): Points {
+    let seed = 0x9e3779b9 ^ o.count;
+    const rand = () => {
+      // mulberry32
+      seed = (seed + 0x6d2b79f5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    const R = o.radius;
+    const palette = (o.colors ?? ['#ffffff']).map((c) => new Color(c));
+    const pos = new Float32Array(o.count * 3);
+    const col = new Float32Array(o.count * 3);
+    for (let i = 0; i < o.count; i++) {
+      let rho: number;
+      let y: number;
+      if (o.shape === 'shell') {
+        const r = R * (0.6 + 0.4 * Math.cbrt(rand()));
+        const cos = 2 * rand() - 1;
+        [rho, y] = [r * Math.sqrt(1 - cos * cos), r * cos];
+      } else {
+        rho = R * (0.25 + 0.75 * Math.sqrt(rand()));
+        y = R * 0.06 * (rand() + rand() + rand() - 1.5); // thin, thicker in the middle
+      }
+      pos.set([rho, y, rand() * Math.PI * 2], i * 3);
+      palette[Math.floor(rand() * palette.length)]!.toArray(col, i * 3);
+    }
+    const geo = new BufferGeometry();
+    geo.setAttribute('position', new BufferAttribute(pos, 3));
+    geo.setAttribute('color', new BufferAttribute(col, 3));
+    const time = { value: 0 };
+    this.clouds.push(time);
+    const mat = new PointsMaterial({ size: o.size ?? 0.04, vertexColors: true, transparent: true, depthWrite: false, blending: AdditiveBlending });
+    mat.onBeforeCompile = (shader) => {
+      Object.assign(shader.uniforms, { uTime: time, uSpeed: { value: o.speed ?? 0.25 }, uRadius: { value: R } });
+      shader.vertexShader = `uniform float uTime, uSpeed, uRadius;\n${shader.vertexShader}`.replace(
+        '#include <begin_vertex>',
+        `float a = position.z + uSpeed * sqrt(uRadius / max(position.x, 0.15 * uRadius)) * uTime;
+        vec3 transformed = vec3(position.x * cos(a), position.y + 0.02 * uRadius * sin(2.0 * a), position.x * sin(a));`,
+      );
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <color_fragment>',
+        '#include <color_fragment>\n\tdiffuseColor.a *= smoothstep(0.5, 0.0, length(gl_PointCoord - 0.5));',
+      );
+    };
+    const points = new Points(geo, mat);
+    points.frustumCulled = false; // the stored positions aren't where the points are drawn
+    return points;
   }
 
   private shadowsOf(root: Object3D, cast: boolean, receive: boolean): void {
@@ -383,6 +449,11 @@ export class Scene3DNode extends ThreeNode {
     for (const m of this.mixers) {
       m.update(dt);
       world = true;
+    }
+    for (const c of this.clouds) {
+      if (c.value === elapsed) continue;
+      c.value = elapsed;
+      view = true; // particles cast no shadows
     }
     const version = this.scene?.params.version ?? 0;
     if (this.timed3d || dt === 0 || version !== this.seen) {

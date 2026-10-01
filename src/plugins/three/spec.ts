@@ -105,7 +105,28 @@ export interface GroupObject extends Object3DBase {
   merge?: boolean;
 }
 
-export type Object3DSpec = ModelObject | BoxObject | SphereObject | CylinderObject | PlaneObject | TorusObject | GroupObject;
+/**
+ * A drifting cloud of glowing points: dust round a product, a galaxy behind a headline.
+ * Each point circles the y axis on its own ring, inner rings faster, with a slow bob. The
+ * motion is a pure function of time, worked out on the GPU, so it costs no CPU per frame
+ * and seeks like everything else. Never casts shadows.
+ */
+export interface ParticlesObject extends Object3DBase {
+  type: 'particles';
+  count: number;
+  /** Outer radius of the cloud. */
+  radius: number;
+  /** `disc` (default): a flat galaxy. `shell`: a sphere of dust. */
+  shape?: 'disc' | 'shell';
+  /** Point size in world units. Default 0.04. */
+  size?: number;
+  /** Radians per second at the rim. Default 0.25. */
+  speed?: number;
+  /** Each point takes one of these. Default white. */
+  colors?: string[];
+}
+
+export type Object3DSpec = ModelObject | BoxObject | SphereObject | CylinderObject | PlaneObject | TorusObject | ParticlesObject | GroupObject;
 
 export interface Light3D {
   type: 'directional' | 'point' | 'spot' | 'ambient' | 'hemisphere';
@@ -140,6 +161,8 @@ export interface Scene3DSpec extends BaseNodeSpec {
   /** Clear colour behind the 3D content. Default transparent. */
   background?: string;
   shadows?: ShadowMode;
+  /** Glow: anything brighter than `threshold` (0–1) bleeds light. Code loads only when set. */
+  bloom?: { strength?: number; radius?: number; threshold?: number };
   /** An invisible floor that shows only shadows. `false` for none. */
   floor?: false | { shadow?: number; size?: number };
   quality?: Quality;
@@ -169,6 +192,9 @@ export const LIMITS_3D = {
   srcLength: 2048,
   palette: 64,
   variants: 32,
+  /** Points across all `particles` objects in one scene. */
+  particles: 50_000,
+  particleColors: 8,
 } as const;
 
 /* -------------------------------------------------------------- validation */
@@ -246,6 +272,13 @@ export function validateScene3D(node: Record<string, unknown>, at: string, ctx: 
   oneOf(node.quality, `${at}.quality`, ['auto', 'high', 'low']);
   oneOf(node.layer, `${at}.layer`, ['overlay', 'inline']);
   oneOf(node.render, `${at}.render`, ['demand', 'always']);
+  if (node.bloom !== undefined) {
+    if (!isRecord(node.bloom)) fail(`${at}.bloom must be { strength?, radius?, threshold? }`);
+    const b = node.bloom as Record<string, unknown>;
+    range(b.strength, `${at}.bloom.strength`, 0, 3);
+    range(b.radius, `${at}.bloom.radius`, 0, 1);
+    range(b.threshold, `${at}.bloom.threshold`, 0, 1);
+  }
   if (node.floor !== undefined && node.floor !== false) {
     if (!isRecord(node.floor)) fail(`${at}.floor must be false or { shadow?, size? }`);
     const f = node.floor as Record<string, unknown>;
@@ -282,6 +315,7 @@ export function validateScene3D(node: Record<string, unknown>, at: string, ctx: 
 
   if (!Array.isArray(node.objects)) fail(`${at}.objects must be a list`);
   let count = 0;
+  let points = 0;
   const material = (m: unknown, w: string) => {
     if (m === undefined) return;
     if (!isRecord(m)) fail(`${w} must be an object`);
@@ -372,13 +406,23 @@ export function validateScene3D(node: Record<string, unknown>, at: string, ctx: 
         positive(ob.tube, `${w}.tube`);
         material(ob.material, `${w}.material`);
         return;
+      case 'particles':
+        if (!(num(ob.count) && Number.isInteger(ob.count) && ob.count >= 1)) fail(`${w}.count must be a whole number, at least 1`);
+        points += ob.count as number;
+        if (points > LIMITS_3D.particles) fail(`${at}: more than ${LIMITS_3D.particles} particles in total`);
+        positive(ob.radius, `${w}.radius`);
+        oneOf(ob.shape, `${w}.shape`, ['disc', 'shell']);
+        range(ob.size, `${w}.size`, 0.001, 10);
+        range(ob.speed, `${w}.speed`, -10, 10);
+        if (ob.colors !== undefined) palette(ob.colors, `${w}.colors`, LIMITS_3D.particleColors, (x, cw) => ctx.checkColor(x, cw));
+        return;
       case 'group':
         if (!Array.isArray(ob.children)) fail(`${w}.children must be a list`);
         bool(ob.merge, `${w}.merge`);
         (ob.children as unknown[]).forEach((c, i) => object(c, `${w}.children[${i}]`, depth + 1));
         return;
       default:
-        fail(`${w}.type must be one of model, box, sphere, cylinder, plane, torus, group`);
+        fail(`${w}.type must be one of model, box, sphere, cylinder, plane, torus, particles, group`);
     }
   };
   (node.objects as unknown[]).forEach((o, i) => object(o, `${at}.objects[${i}]`, 0));

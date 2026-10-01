@@ -456,6 +456,16 @@ export class ThreeNode extends BaseObject {
     };
     this.ratio = 0; // size the composer on the next frame
     this.invalidate('view');
+    this.repaint();
+  }
+
+  /**
+   * Something arrived asynchronously (the bloom code, a model). A playing scene draws it on its next
+   * frame; a stopped one (reduced motion: one `seek`, then nothing) never would, so the still frame
+   * would keep the plain picture. Paint this node now, at the scene's own time, as a seek would.
+   */
+  protected repaint(): void {
+    if (this.scene && !this.scene.playing && !this.destroyed) this.onUpdate(0, this.scene.elapsed);
   }
 
   override onMount(scene: SceneLike): void {

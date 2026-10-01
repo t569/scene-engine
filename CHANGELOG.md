@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `scene3d`: `bloom` and a `particles` object (`count`, `radius`, `shape`, `size`, `speed`, `colors`), both
+  validated and capped (50 000 points per scene). Points move in the vertex shader from the time alone:
+  seekable, no CPU per frame, deterministic seeding so a still frame is the same on every load.
+- Fix: a stopped scene (reduced motion: one `seek`) never drew what arrived later — the bloom code, a
+  model — so its still frame stayed plain or empty. `ThreeNode` now repaints itself at the scene's time.
 - Fix: an overlay `ThreeNode` placed its canvas before its own transform was written. A scene that
   drew one frame (a `seek`) and then paused showed the canvas half a box up and left, over the page.
 - `ThreeNode` `bloom: { strength, radius, threshold }`: glow via EffectComposer + UnrealBloomPass +

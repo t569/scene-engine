@@ -353,9 +353,11 @@ driven by the same params as the 2D nodes around it:
 | `environment` | `{ preset: 'studio' \| 'none', intensity }`: soft image-based light, default studio |
 | `shadows` | `soft` (default), `sharp`, `none`; `floor: { shadow, size }` or `false` |
 | `lights` | ≤ 16 of `directional`, `point`, `spot`, `ambient`, `hemisphere`; ≤ 4 cast shadows; `bind` (`intensity`, `position.*`), `visible_when` |
-| `objects` | ≤ 500 of `model`, `box` (`radius` rounds it), `sphere`, `cylinder`, `plane`, `torus`, `group` (`merge: true` for static detail) |
+| `objects` | ≤ 500 of `model`, `box` (`radius` rounds it), `sphere`, `cylinder`, `plane`, `torus`, `particles`, `group` (`merge: true` for static detail) |
 | per object | `position`, `rotation` (degrees), `scale`, `castShadow`, `receiveShadow`, `bind` (`position.*`, `rotation.*`, `scale`), `visible_when`, `on_click` |
 | `model` | `src`, `fit` + `fitAxis`, `center`, `variant`, `variant_by`, `animation` |
+| `particles` | `count` (≤ 50 000 per scene), `radius`, `shape` (`disc`, `shell`), `size`, `speed`, `colors` (≤ 8): glowing points circling the y axis, moved on the GPU as a function of time, so they seek and cost no CPU per frame |
+| `bloom` | `{ strength, radius, threshold }`: glow, as below; the code loads only when set |
 | `material` | `color`, `color_by`, `roughness`, `metalness`, `emissive`, `emissiveIntensity`, `opacity`, `clearcoat`, `transmission`, `flatShading`, `side` |
 | `quality`, `layer`, `render` | `auto`/`high`/`low`; `overlay`/`inline`; `demand`/`always` (see below) |
 

@@ -166,6 +166,14 @@ describe('scene3d validation', () => {
     bad(scene3d({ objects: [{ type: 'sphere', radius: 1, segments: 10000 }] }), /segments must be a whole number from 3 to 128/);
   });
 
+  it('takes glow and particles as data, and caps the particle count', () => {
+    const cloud = { type: 'particles', count: 3000, radius: 2, colors: ['#fff', '#8cf'], speed: 0.3 };
+    expect(() => ok(scene3d({ bloom: { strength: 1, threshold: 0.6 }, objects: [cloud] }))).not.toThrow();
+    bad(scene3d({ bloom: { strength: 50 } }), /bloom\.strength/);
+    bad(scene3d({ objects: [cloud, { ...cloud, count: 48_000 }] }), /more than 50000 particles/);
+    bad(scene3d({ objects: [{ ...cloud, colors: ['url(javascript:1)'] }] }), /colors\[0\]/);
+  });
+
   it('names the path of what is wrong', () => {
     bad(scene3d({ objects: [{ type: 'box', size: [1, 1, 1], bind: { 'material.color': 'colour' } }] }), /objects\[0\]\.objects\[0\]\.bind\.material\.color is not bindable/);
     bad(scene3d({ objects: [{ type: 'box', size: [1, 1, 1], material: { color_by: { param: 'nope', palette: ['#fff'] } } }] }), /color_by\.param must name one of scene.params/);
