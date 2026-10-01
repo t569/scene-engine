@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fix: an overlay `ThreeNode` placed its canvas before its own transform was written. A scene that
+  drew one frame (a `seek`) and then paused showed the canvas half a box up and left, over the page.
 - `ThreeNode` `bloom: { strength, radius, threshold }`: glow via EffectComposer + UnrealBloomPass +
   OutputPass, imported only when set (views without it pay nothing), sized by the resolution
   governor, disposed on destroy.

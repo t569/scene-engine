@@ -573,6 +573,9 @@ export class ThreeNode extends BaseObject {
     }
     for (const fn of this.frames) if (fn(dt, elapsed) === true) this.invalidate('world');
     if (!this.onScreen) return;
+    // The clock writes the transform after onUpdate; fit() measures it, so write it first. Otherwise a
+    // lone frame (a seek, then paused off screen) leaves the canvas half a box off, over the page.
+    this.applyTransform();
     this.fit();
     const always = this.opts.render === 'always';
     if (this.needsRender || always) {
