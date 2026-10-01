@@ -399,6 +399,10 @@ view.onFrame((dt) => { spinner.rotation.y += dt; return true; }); // true = I mo
   hosted: `configureLoaders({ ktx2TranscoderPath, dracoDecoderPath })` (three
   ships both under `examples/jsm/libs/`). Parsed models are cached per URL.
 - **Pauses off screen**; frees GPU memory and its WebGL context on destroy.
+- **Glow on request.** `bloom: { strength, radius, threshold }` bleeds light
+  from anything brighter than `threshold` (three's UnrealBloomPass). The
+  post-processing code is imported only when set, so views without it pay
+  nothing; it follows the adaptive resolution like the plain render.
 
 **Layering.** By default (`layer: 'overlay'`) the canvas sits under the SVG
 and every SVG node draws on top of the 3D view: labels, hotspots and controls

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `ThreeNode` `bloom: { strength, radius, threshold }`: glow via EffectComposer + UnrealBloomPass +
+  OutputPass, imported only when set (views without it pay nothing), sized by the resolution
+  governor, disposed on destroy.
 - `space3d` polyhedra: `tetrahedron`, `cube`, `octahedron`, `cuboctahedron`, `icosahedron`,
   `dodecahedron`, as named shapes a spec can use. Edges are derived (vertex pairs at the shortest
   distance), drawn as a new `EdgesItem`, depth-faded like any line.
