@@ -5,6 +5,8 @@
 - `ThreeNode.sharedRenderer`: many views, one WebGL context. Views made while it is set draw into
   their own render target (`output`, `version`, `background`) for a host to composite
   onto its canvas, instead of each holding one of the browser's ~16 contexts. The README has the details.
+- `ThreeNode.pixelRatioCap`: a ceiling on every view's pixel ratio, under each one's `maxPixelRatio`, for
+  a host that knows the device can't afford what its screen offers (a phone at 3x).
 - `ThreeNode.onDraw`: called whenever a shared view has drawn, so a host composites in the same
   frame. Compositing from the host's own animation frame showed the frame before: a drag answered late.
 - The resolution governor judges frames against the display's own period (measured once, at the first

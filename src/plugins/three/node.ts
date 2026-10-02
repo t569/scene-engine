@@ -393,6 +393,12 @@ export class ThreeNode extends BaseObject {
    * so a drag answers a frame late; compositing here shows it in the frame it was drawn.
    */
   static onDraw: (() => void) | null = null;
+  /**
+   * A ceiling on every view's pixel ratio, under each one's own `maxPixelRatio`: for a host that
+   * knows the device can't afford what the screen offers (a phone at 3× with a phone's GPU, where
+   * a full-screen view at 2× is millions of pixels a frame). Null: no ceiling.
+   */
+  static pixelRatioCap: number | null = null;
 
   /** The three.js scene. Named `world` so it can't be confused with the engine's `Scene`. */
   readonly world = new World();
@@ -780,7 +786,7 @@ export class ThreeNode extends BaseObject {
 
   private baseRatio(): number {
     const cap = this.opts.quality === 'low' ? 1 : (this.opts.maxPixelRatio ?? 2);
-    return Math.min(globalThis.devicePixelRatio || 1, cap);
+    return Math.min(globalThis.devicePixelRatio || 1, cap, ThreeNode.pixelRatioCap ?? Infinity);
   }
 
   private applyRatio(scale: number): void {
