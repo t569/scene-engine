@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Fix: a view that isn't laid out (`display: none` above it) no longer draws. Chrome's `getScreenCTM`
+  answers there with an identity matrix, so the canvas was placed and sized wrongly, and a host showing
+  it later showed that frame in the wrong place.
 - Fix: `disposeObject` on a model copy no longer frees the geometry, materials and textures it
   shares with the cached glTF, which broke other copies and the next load of that URL.
 - `ThreeNode.sharedRenderer`: many views, one WebGL context. Views made while it is set draw into

@@ -773,7 +773,10 @@ export class ThreeNode extends BaseObject {
       t.gl.deleteQuery(q);
     }
     for (const fn of this.frames) if (fn(dt, elapsed) === true) this.invalidate('world');
-    if (!this.onScreen || this.hold) return;
+    // Not laid out (display: none somewhere above): getScreenCTM still answers, with an identity
+    // matrix, so fit() would place and size the canvas wrongly and the frame would be drawn at that
+    // size. A host showing it later would show that frame there until the next one.
+    if (!this.onScreen || this.hold || !this.canvas.getClientRects().length) return;
     // The clock writes the transform after onUpdate; fit() measures it, so write it first. Otherwise a
     // lone frame (a seek, then paused off screen) leaves the canvas half a box off, over the page.
     this.applyTransform();
