@@ -357,6 +357,8 @@ export function disposeObject(root: Object3D): void {
   root.traverse((o) => {
     const mesh = o as Mesh;
     mesh.geometry?.dispose();
+    // A light's shadow map: a shared context would keep it (2048² for a sun) after the scene is gone.
+    (o as Object3D & { shadow?: { dispose(): void } }).shadow?.dispose();
     const mats = mesh.material ? (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) : [];
     for (const m of mats as Material[]) {
       for (const v of Object.values(m)) if ((v as Texture | null)?.isTexture) (v as Texture).dispose();
@@ -374,6 +376,8 @@ export function disposeObject(root: Object3D): void {
 const SETTLE_MS = 150;
 /** A sharpening step is taken only if its predicted cost stays under this. */
 const SHARPEN_MS = 250;
+/** Shared mode: one GPU queue for every view and the composite, so a sharpening frame stalls them all. */
+const SHARPEN_SHARED_MS = 50;
 let hostRuleAdded = false;
 
 export class ThreeNode extends BaseObject {
@@ -452,6 +456,11 @@ export class ThreeNode extends BaseObject {
   private readonly target: WebGLRenderTarget | null = null;
   /** The texture the last frame went into: the target's, or the composer's once bloom has arrived. */
   private lastOutput: Texture | null = null;
+  /**
+   * Shared mode: the part of `output` the last frame filled, from its bottom-left corner. Below 1
+   * when it was drawn at reduced resolution; a host samples `uv * outputScale`.
+   */
+  readonly outputScale = new Vector2(1, 1);
   /** Shared mode: bumped on every drawn frame, so a host composites only when something changed. */
   version = 0;
   /**
@@ -570,10 +579,17 @@ export class ThreeNode extends BaseObject {
     r.setRenderTarget(plain ?? this.target);
     const done = r.compileAsync(this.world, this.camera);
     r.setRenderTarget(prev);
-    return done.then(
-      () => plain?.dispose(),
-      () => plain?.dispose(),
-    );
+    // Then one frame into a 1x1 target: it uploads the geometry and textures, which the first real
+    // frame would otherwise do mid-transition (tens of MB for a dense mesh). Its pixel is not shown.
+    const upload = () => {
+      if (this.destroyed || this.version) return;
+      const before = r.getRenderTarget();
+      this.configure();
+      r.setRenderTarget(plain ?? this.target);
+      r.render(this.world, this.camera);
+      r.setRenderTarget(before);
+    };
+    return done.then(upload, () => {}).finally(() => plain?.dispose());
   }
 
   private async loadBloom({ strength = 0.8, radius = 0.4, threshold = 0.6 }: NonNullable<ThreeOptions['bloom']>): Promise<void> {
@@ -778,14 +794,14 @@ export class ThreeNode extends BaseObject {
       // stops short instead of tripping the GPU watchdog, which kills the context.
       if (this.lowRes && performance.now() - this.lastRender > SETTLE_MS) {
         const next = Math.min(1, this.drawnScale * 1.6);
-        if (this.lastCost * (next / this.drawnScale) ** 2 <= SHARPEN_MS) this.drawFrame(next);
+        if (this.lastCost * (next / this.drawnScale) ** 2 <= (this.target ? SHARPEN_SHARED_MS : SHARPEN_MS)) this.drawFrame(next);
         else this.lowRes = false; // as sharp as this view affords
       }
     }
   }
 
   private drawFrame(scale: number): void {
-    this.applyRatio(scale);
+    scale = this.applyRatio(scale);
     const prev = this.renderer.getRenderTarget();
     if (this.target) {
       this.configure();
@@ -819,18 +835,42 @@ export class ThreeNode extends BaseObject {
     return Math.min(globalThis.devicePixelRatio || 1, cap, ThreeNode.pixelRatioCap ?? Infinity);
   }
 
-  private applyRatio(scale: number): void {
-    const ratio = Math.round(this.baseRatio() * scale * 100) / 100;
-    if (ratio === this.ratio) return;
-    this.ratio = ratio;
+  /** Size for `scale`; returns the scale actually drawn at. */
+  private applyRatio(scale: number): number {
     const { w, h } = this.cssSize;
-    if (this.target) this.target.setSize(Math.max(1, Math.round(w * ratio)), Math.max(1, Math.round(h * ratio)));
-    else {
+    const base = this.baseRatio();
+    // Shared, no bloom: the target stays at full size and a reduced frame fills its corner (as
+    // engines do dynamic resolution). Resizing it reallocated a 4x MSAA buffer every scale step.
+    if (this.target && !this.composer) {
+      const fw = Math.max(1, Math.round(w * base));
+      const fh = Math.max(1, Math.round(h * base));
+      if (base !== this.ratio) {
+        this.ratio = base;
+        this.target.setSize(fw, fh);
+      }
+      const sw = Math.max(1, Math.round(fw * scale));
+      const sh = Math.max(1, Math.round(fh * scale));
+      this.target.viewport.set(0, 0, sw, sh);
+      this.target.scissor.set(0, 0, sw, sh);
+      this.target.scissorTest = sw < fw || sh < fh;
+      this.outputScale.set(sw / fw, sh / fh);
+      return scale;
+    }
+    // A canvas or a composer can only be resized, which reallocates: a few levels, not every step.
+    // ponytail: snapped levels; a viewport-aware composer if the resizes still hitch.
+    if (scale < 1) scale = Math.max(this.governor.min, scale > 0.7 ? 0.7 : 0.5);
+    this.outputScale.set(1, 1);
+    const ratio = Math.round(base * scale * 100) / 100;
+    if (ratio === this.ratio) return scale;
+    this.ratio = ratio;
+    // With bloom the composer draws into its own targets; this one stays unused at 1x1.
+    if (!this.target) {
       this.renderer.setPixelRatio(ratio);
       this.renderer.setSize(w, h, false);
     }
     this.composer?.setPixelRatio(ratio);
-    this.composer?.setSize(this.cssSize.w, this.cssSize.h);
+    this.composer?.setSize(w, h);
+    return scale;
   }
 
   /**
