@@ -5,6 +5,14 @@
 - `ThreeNode.sharedRenderer`: many views, one WebGL context. Views made while it is set draw into
   their own render target (`output`, `version`, `background`) for a host to composite
   onto its canvas, instead of each holding one of the browser's ~16 contexts. The README has the details.
+- `ThreeNode.onDraw`: called whenever a shared view has drawn, so a host composites in the same
+  frame. Compositing from the host's own animation frame showed the frame before: a drag answered late.
+- The resolution governor judges frames against the display's own period (measured once, at the first
+  view), never less than the 20 ms budget. Unchanged at 60 Hz; at 30 Hz (battery saver, some displays)
+  every frame used to read as slow and every view sat at its lowest resolution.
+- Far over budget (3x), the governor decides in three frames and drops straight to the scale that would
+  fit (cost goes with scale squared), rather than 20 % per twenty-frame window: at 200 ms a frame, that
+  was half a minute of stalls.
 - `ThreeNode.setClearColor`: the clear colour kept per view and restored before each shared frame.
   `scene3d`'s `background` uses it; it was lost on a shared renderer.
 - `scene3d` particles are sized by what they are drawn into, not the renderer's canvas (three's

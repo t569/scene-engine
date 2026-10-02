@@ -431,6 +431,11 @@ renderer, and destroying a view never disposes it.
 A shared renderer's state belongs to whoever drew last, so a view's clear
 colour goes through `view.setClearColor(colour, alpha)`, not the renderer's.
 
+Composite from `ThreeNode.onDraw` (coalesced, e.g. in a microtask) as well as
+from your own animation frame: views draw in their animation frames, after a
+host's that was registered first, so a host compositing only there shows each
+view's previous frame.
+
 ### `@t569/scene-engine/dicebear`
 
 Adopts a DiceBear SVG string as a node. It takes markup rather than a DiceBear

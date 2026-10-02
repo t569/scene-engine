@@ -33,6 +33,12 @@ describe('ResolutionGovernor', () => {
     expect(g.scale).toBe(1);
   });
 
+  it('far over budget, drops within three frames, straight to a scale that fits', () => {
+    const g = new ResolutionGovernor(0.1);
+    expect(feed(g, 200, 3)).toBe(1); // 10x the 20 ms budget: cost goes with scale squared
+    expect(g.scale).toBe(0.32); // sqrt(20 / 200)
+  });
+
   it('ignores stalls (a tab switch is not a slow GPU)', () => {
     const g = new ResolutionGovernor();
     feed(g, 2000, 100);

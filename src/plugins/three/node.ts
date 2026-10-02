@@ -110,6 +110,30 @@ export type FrameFn = (dt: number, elapsed: number) => boolean | void;
  * raises it again after a run of good frames. Hysteresis stops it hunting:
  * after a drop it wants twice the evidence before trying to go back up. Pure.
  */
+const GOVERNOR_BUDGET = 1000 / 50;
+
+/**
+ * The display's frame period: the least gap over 30 animation frames, measured once, when the first
+ * view is made. A 30 Hz display (or a browser held there, as on battery saver) can never give a frame
+ * inside a 60 Hz budget, and every view would sit at its lowest resolution however cheap it was.
+ */
+let framePeriod = 1000 / 60;
+let periodProbed = false;
+function probeFramePeriod(): void {
+  if (periodProbed || typeof requestAnimationFrame === 'undefined') return;
+  periodProbed = true;
+  let last = 0;
+  let n = 0;
+  let least = Infinity;
+  const tick = (t: number) => {
+    if (last) least = Math.min(least, t - last);
+    last = t;
+    if (++n < 30) requestAnimationFrame(tick);
+    else if (least > 4 && least < 100) framePeriod = least;
+  };
+  requestAnimationFrame(tick);
+}
+
 export class ResolutionGovernor {
   scale = 1;
   private window: number[] = [];
@@ -119,7 +143,7 @@ export class ResolutionGovernor {
   constructor(
     readonly min = 0.5,
     /** Milliseconds a frame may take: a little over 60 Hz, so vsync itself reads as good. */
-    readonly budget = 1000 / 50,
+    public budget = GOVERNOR_BUDGET,
     readonly size = 20,
   ) {}
 
@@ -127,11 +151,15 @@ export class ResolutionGovernor {
   sample(ms: number): boolean {
     if (!(ms > 0) || ms > 250) return false; // a stall or a tab switch, not a signal
     this.window.push(ms);
-    if (this.window.length < this.size) return false;
     const avg = this.window.reduce((a, b) => a + b, 0) / this.window.length;
+    // Far over budget, three frames are evidence enough: at 200 ms a frame, a full window is 4 s of stalls.
+    const far = this.window.length >= 3 && avg > this.budget * 3;
+    if (this.window.length < this.size && !far) return false;
     this.window.length = 0;
     if (avg > this.budget * 1.15 && this.scale > this.min) {
-      this.scale = Math.max(this.min, Math.round(this.scale * 0.8 * 100) / 100);
+      // Cost goes with the pixel count, the scale squared: far over, straight to where it would fit.
+      const fit = far ? Math.min(0.8, Math.sqrt(this.budget / avg)) : 0.8;
+      this.scale = Math.max(this.min, Math.round(this.scale * fit * 100) / 100);
       this.good = 0;
       this.need = 6;
       return true;
@@ -359,6 +387,12 @@ export class ThreeNode extends BaseObject {
   static sharedRenderer: WebGLRenderer | null = null;
   /** The live nodes drawing into `sharedRenderer`, for the host to composite. */
   static readonly shared = new Set<ThreeNode>();
+  /**
+   * Shared mode: called each time a node has drawn a frame. A host compositing from its own
+   * animation frame would otherwise show the frame before (its callback runs ahead of the views'),
+   * so a drag answers a frame late; compositing here shows it in the frame it was drawn.
+   */
+  static onDraw: (() => void) | null = null;
 
   /** The three.js scene. Named `world` so it can't be confused with the engine's `Scene`. */
   readonly world = new World();
@@ -470,6 +504,7 @@ export class ThreeNode extends BaseObject {
     // is half resolution and looks fine; on a 1x laptop, half would be visibly soft.
     const floor = opts.minResolution ?? 0.75;
     this.governor = new ResolutionGovernor(Math.min(1, Math.max(opts.minResolution ? 0.1 : 0.5, floor / this.baseRatio())));
+    probeFramePeriod();
     if (opts.bloom) void this.loadBloom(opts.bloom);
   }
 
@@ -690,6 +725,9 @@ export class ThreeNode extends BaseObject {
       this.lastQ.copy(cam.quaternion);
       this.lastP.copy(cam.position);
       const busy = this.streak >= 2 && !crawl;
+      // The gap between frames: what the reader sees. (GPU timer queries under-report on some
+      // drivers, ANGLE on Direct3D 11 among them.) Judged against the display's own frame period.
+      this.governor.budget = Math.max(GOVERNOR_BUDGET, framePeriod * 1.2);
       if (busy && this.streak > 2) this.governor.sample(now - this.lastRender);
       const auto = (this.opts.quality ?? 'auto') !== 'high';
       const moving = auto && now < this.movingUntil;
@@ -728,6 +766,7 @@ export class ThreeNode extends BaseObject {
       this.lastOutput = this.composer?.texture ?? this.target.texture;
     }
     this.version++;
+    if (this.target) ThreeNode.onDraw?.();
     if (q) {
       t!.gl.endQuery(t!.ext.TIME_ELAPSED_EXT);
       t!.queries.push(q);
