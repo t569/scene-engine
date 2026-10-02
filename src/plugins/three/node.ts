@@ -400,6 +400,13 @@ export class ThreeNode extends BaseObject {
    */
   static pixelRatioCap: number | null = null;
 
+  /**
+   * Keep the last frame and draw nothing new: for a host taking the view away (dissolving it into
+   * another), where a still frame can't be told from a moving one and the GPU is wanted elsewhere.
+   * The scene's clock runs on; clear it and the next frame catches up.
+   */
+  hold = false;
+
   /** The three.js scene. Named `world` so it can't be confused with the engine's `Scene`. */
   readonly world = new World();
   readonly camera: PerspectiveCamera;
@@ -544,6 +551,29 @@ export class ThreeNode extends BaseObject {
    */
   get output(): Texture | null {
     return this.lastOutput;
+  }
+
+  /**
+   * Shared mode: compile this view's shaders ahead of its first frame, for a view a host keeps
+   * hidden but will show soon: compiled on first draw instead, the program link stalls that frame
+   * (100–200 ms, mid-transition). The programs are the ones the view will draw with: compiled with
+   * its own renderer settings, into its target, or (with bloom) into a target like the composer's.
+   * Uses parallel compilation where the driver has it. Content added later compiles when drawn.
+   */
+  warm(): Promise<void> {
+    if (!this.target || this.destroyed) return Promise.resolve();
+    const r = this.renderer;
+    const prev = r.getRenderTarget();
+    this.configure();
+    // Bloom draws the scene into the composer's own (plain, linear) targets: any plain target keys alike.
+    const plain = this.composer ? new WebGLRenderTarget(1, 1, { type: HalfFloatType }) : null;
+    r.setRenderTarget(plain ?? this.target);
+    const done = r.compileAsync(this.world, this.camera);
+    r.setRenderTarget(prev);
+    return done.then(
+      () => plain?.dispose(),
+      () => plain?.dispose(),
+    );
   }
 
   private async loadBloom({ strength = 0.8, radius = 0.4, threshold = 0.6 }: NonNullable<ThreeOptions['bloom']>): Promise<void> {
@@ -712,7 +742,7 @@ export class ThreeNode extends BaseObject {
       t.gl.deleteQuery(q);
     }
     for (const fn of this.frames) if (fn(dt, elapsed) === true) this.invalidate('world');
-    if (!this.onScreen) return;
+    if (!this.onScreen || this.hold) return;
     // The clock writes the transform after onUpdate; fit() measures it, so write it first. Otherwise a
     // lone frame (a seek, then paused off screen) leaves the canvas half a box off, over the page.
     this.applyTransform();

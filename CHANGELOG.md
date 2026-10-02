@@ -5,6 +5,11 @@
 - `ThreeNode.sharedRenderer`: many views, one WebGL context. Views made while it is set draw into
   their own render target (`output`, `version`, `background`) for a host to composite
   onto its canvas, instead of each holding one of the browser's ~16 contexts. The README has the details.
+- `view.hold`: keep the last frame and draw nothing, for a host dissolving a view away (two views
+  drawing at once was what made a transition stutter). The clock runs on; clear it to catch up.
+- `view.warm()`: compile a hidden view's shaders ahead of its first frame, with the renderer state it
+  will draw with (its target, or a plain one under bloom), in parallel where the driver allows. A
+  program linked on first draw stalled that frame by 100–200 ms.
 - `ThreeNode.pixelRatioCap`: a ceiling on every view's pixel ratio, under each one's `maxPixelRatio`, for
   a host that knows the device can't afford what its screen offers (a phone at 3x).
 - `ThreeNode.onDraw`: called whenever a shared view has drawn, so a host composites in the same
