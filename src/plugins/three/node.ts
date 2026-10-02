@@ -18,9 +18,13 @@
  * - By default the canvas is an overlay under the SVG rather than inside a
  *   `<foreignObject>`: measured smoother (a third of the janky frames) and it
  *   avoids Safari's foreignObject bugs. `layer: 'inline'` keeps the old way.
+ * - Shared mode (`ThreeNode.sharedRenderer`): many views, one WebGL context.
+ *   Each node draws into a render target; a host composites them. See there.
  */
 import {
   ACESFilmicToneMapping,
+  Color,
+  HalfFloatType,
   Matrix4,
   Mesh,
   Object3D,
@@ -34,7 +38,9 @@ import {
   VSMShadowMap,
   Vector2,
   Vector3,
+  WebGLRenderTarget,
   WebGLRenderer,
+  type ColorRepresentation,
   type Intersection,
   type Material,
   type Texture,
@@ -87,6 +93,8 @@ export interface ThreeOptions extends BaseNodeSpec {
 /** The part of three's EffectComposer this node uses. */
 interface Composer {
   render(): void;
+  /** The finished frame, when it renders off screen (shared mode). */
+  readonly texture: Texture;
   setPixelRatio(r: number): void;
   setSize(w: number, h: number): void;
   dispose(): void;
@@ -324,6 +332,10 @@ export function disposeObject(root: Object3D): void {
     const mats = mesh.material ? (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) : [];
     for (const m of mats as Material[]) {
       for (const v of Object.values(m)) if ((v as Texture | null)?.isTexture) (v as Texture).dispose();
+      // A shader's textures (a palette, a reference orbit) live in its uniforms. With a context per
+      // node, losing the context freed them anyway; a shared context keeps them until disposed.
+      const uniforms = (m as Material & { uniforms?: Record<string, { value: unknown } | undefined> }).uniforms ?? {};
+      for (const u of Object.values(uniforms)) if ((u?.value as Texture | null)?.isTexture) (u!.value as Texture).dispose();
       m.dispose();
     }
   });
@@ -337,6 +349,17 @@ const SHARPEN_MS = 250;
 let hostRuleAdded = false;
 
 export class ThreeNode extends BaseObject {
+  /**
+   * Many views, one WebGL context. Browsers allow ~16 contexts a page, and each costs 150–250 ms
+   * to create. While a host sets this, new nodes borrow the renderer instead of making their own:
+   * each draws into its own render target (`output`), and the host composites the targets onto its
+   * canvas, wherever each node's `canvas` sits on screen. That canvas then gets no context: it stays
+   * as the node's box, for layout and pointer events, and is transparent. The host owns the renderer.
+   */
+  static sharedRenderer: WebGLRenderer | null = null;
+  /** The live nodes drawing into `sharedRenderer`, for the host to composite. */
+  static readonly shared = new Set<ThreeNode>();
+
   /** The three.js scene. Named `world` so it can't be confused with the engine's `Scene`. */
   readonly world = new World();
   readonly camera: PerspectiveCamera;
@@ -378,6 +401,19 @@ export class ThreeNode extends BaseObject {
   private composer: Composer | null = null;
   /** Set on destroy: an import that lands afterwards must not touch the lost context. */
   private destroyed = false;
+  /** Shared mode: where frames are drawn, when there is no composer. */
+  private readonly target: WebGLRenderTarget | null = null;
+  /** The texture the last frame went into: the target's, or the composer's once bloom has arrived. */
+  private lastOutput: Texture | null = null;
+  /** Shared mode: bumped on every drawn frame, so a host composites only when something changed. */
+  version = 0;
+  /**
+   * Shared mode: the CSS colour that was behind the canvas (the SVG's background, else the mount's),
+   * lifted off so the host's canvas shows through. The host paints it under `output`.
+   */
+  background = '';
+  /** This view's clear colour and alpha (see `setClearColor`). */
+  private clear: [Color, number] = [new Color(0x000000), 0];
 
   constructor(private readonly opts: ThreeOptions) {
     const g = document.createElementNS(SVG_NS, 'g');
@@ -412,13 +448,18 @@ export class ThreeNode extends BaseObject {
       fo.appendChild(this.canvas);
     }
 
-    this.renderer = new WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: true, powerPreference: 'high-performance' });
-    this.renderer.outputColorSpace = SRGBColorSpace;
-    this.renderer.toneMapping = ACESFilmicToneMapping;
-    this.renderer.shadowMap.enabled = this.shadowMode !== 'none';
-    this.renderer.shadowMap.type = this.shadowMode === 'soft' ? VSMShadowMap : PCFShadowMap;
-    // We decide when shadows are redrawn (see `invalidate`), except in `always` mode.
-    this.renderer.shadowMap.autoUpdate = opts.render === 'always';
+    const shared = ThreeNode.sharedRenderer;
+    this.renderer = shared ?? new WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: true, powerPreference: 'high-performance' });
+    if (shared) {
+      // three tone-maps and encodes only into the screen and XR targets; into any other target it
+      // writes linear light, and translucent layers then blend in linear space: a different picture,
+      // that no conversion afterwards can undo. Marked as an output, the target gets exactly what a
+      // canvas would. Half float, so the encoded values are stored as they are (no hardware sRGB).
+      this.target = new WebGLRenderTarget(1, 1, { type: HalfFloatType, samples: 4, colorSpace: SRGBColorSpace });
+      (this.target as WebGLRenderTarget & { isXRRenderTarget: boolean }).isXRRenderTarget = true;
+      ThreeNode.shared.add(this);
+    }
+    this.configure();
 
     const gl = this.renderer.getContext();
     const ext = 'createQuery' in gl ? gl.getExtension('EXT_disjoint_timer_query_webgl2') : null;
@@ -432,6 +473,38 @@ export class ThreeNode extends BaseObject {
     if (opts.bloom) void this.loadBloom(opts.bloom);
   }
 
+  /** Renderer settings. Shared mode sets them again before each frame: the other nodes have theirs. */
+  private configure(): void {
+    const r = this.renderer;
+    // A shared renderer comes with the host's settings; without a clear, a target keeps its last
+    // frame and translucent layers pile up a little more each frame.
+    r.autoClear = true;
+    r.outputColorSpace = SRGBColorSpace;
+    r.toneMapping = ACESFilmicToneMapping;
+    r.setClearColor(...this.clear);
+    r.shadowMap.enabled = this.shadowMode !== 'none';
+    r.shadowMap.type = this.shadowMode === 'soft' ? VSMShadowMap : PCFShadowMap;
+    // We decide when shadows are redrawn (see `invalidate`), except in `always` mode.
+    r.shadowMap.autoUpdate = this.opts.render === 'always';
+  }
+
+  /**
+   * Set the clear colour through this, not `renderer.setClearColor`: a shared renderer's clear
+   * colour belongs to whoever drew last, so each view keeps its own and puts it back per frame.
+   */
+  setClearColor(color: ColorRepresentation, alpha = 1): void {
+    this.clear = [new Color(color), alpha];
+    this.renderer.setClearColor(color, alpha);
+  }
+
+  /**
+   * Shared mode: the last drawn frame, for the host to composite. Null until one is drawn, and when
+   * not shared. Final colours, premultiplied, as the node's own canvas would have shown them.
+   */
+  get output(): Texture | null {
+    return this.lastOutput;
+  }
+
   private async loadBloom({ strength = 0.8, radius = 0.4, threshold = 0.6 }: NonNullable<ThreeOptions['bloom']>): Promise<void> {
     const [{ EffectComposer }, { RenderPass }, { UnrealBloomPass }, { OutputPass }] = await Promise.all([
       import('three/addons/postprocessing/EffectComposer.js'),
@@ -441,12 +514,16 @@ export class ThreeNode extends BaseObject {
     ]);
     if (this.destroyed) return;
     const composer = new EffectComposer(this.renderer);
+    composer.renderToScreen = !this.target;
     const bloom = new UnrealBloomPass(new Vector2(1, 1), strength, radius, threshold);
     composer.addPass(new RenderPass(this.world, this.camera));
     composer.addPass(bloom);
     composer.addPass(new OutputPass()); // tone mapping and sRGB happen here, after the glow
     this.composer = {
       render: () => composer.render(),
+      get texture() {
+        return composer.readBuffer.texture;
+      },
       setPixelRatio: (r) => composer.setPixelRatio(r),
       setSize: (w, h) => composer.setSize(w, h),
       dispose: () => {
@@ -490,8 +567,17 @@ export class ThreeNode extends BaseObject {
           document.head.appendChild(style);
           hostRuleAdded = true;
         }
+        // Shared: the host's canvas is behind the page, so nothing here may be opaque. The colour
+        // goes to the host to paint instead (the SVG's first: it's the one over the canvas).
+        if (this.target) {
+          const mountBg = mount.style.background;
+          this.background = prev.bg || getComputedStyle(mount).backgroundColor;
+          svg.style.background = 'transparent';
+          mount.style.background = 'transparent';
+          this.restore.push(() => (mount.style.background = mountBg));
+        }
         // An opaque SVG background would hide the canvas under it: it moves to a layer behind both, the SVG's size.
-        if (prev.bg) {
+        else if (prev.bg) {
           this.backdrop = document.createElement('div');
           this.backdrop.style.cssText = `position:absolute;pointer-events:none;background:${prev.bg};`;
           svg.style.background = 'transparent';
@@ -626,12 +712,22 @@ export class ThreeNode extends BaseObject {
 
   private drawFrame(scale: number): void {
     this.applyRatio(scale);
+    const prev = this.renderer.getRenderTarget();
+    if (this.target) {
+      this.configure();
+      this.renderer.setRenderTarget(this.target);
+    }
     if (this.opts.render !== 'always') this.renderer.shadowMap.needsUpdate = this.needsShadows;
     const t = this.timer;
     const q = t && t.queries.length < 4 ? t.gl.createQuery() : null;
     if (q) t!.gl.beginQuery(t!.ext.TIME_ELAPSED_EXT, q);
     if (this.composer) this.composer.render();
     else this.renderer.render(this.world, this.camera);
+    if (this.target) {
+      this.renderer.setRenderTarget(prev);
+      this.lastOutput = this.composer?.texture ?? this.target.texture;
+    }
+    this.version++;
     if (q) {
       t!.gl.endQuery(t!.ext.TIME_ELAPSED_EXT);
       t!.queries.push(q);
@@ -652,8 +748,12 @@ export class ThreeNode extends BaseObject {
     const ratio = Math.round(this.baseRatio() * scale * 100) / 100;
     if (ratio === this.ratio) return;
     this.ratio = ratio;
-    this.renderer.setPixelRatio(ratio);
-    this.renderer.setSize(this.cssSize.w, this.cssSize.h, false);
+    const { w, h } = this.cssSize;
+    if (this.target) this.target.setSize(Math.max(1, Math.round(w * ratio)), Math.max(1, Math.round(h * ratio)));
+    else {
+      this.renderer.setPixelRatio(ratio);
+      this.renderer.setSize(w, h, false);
+    }
     this.composer?.setPixelRatio(ratio);
     this.composer?.setSize(this.cssSize.w, this.cssSize.h);
   }
@@ -743,9 +843,14 @@ export class ThreeNode extends BaseObject {
     this.composer?.dispose();
     disposeObject(this.world);
     this.world.environment?.dispose();
-    this.renderer.dispose();
-    // Browsers allow ~16 live WebGL contexts per page; give this one back now, not at GC.
-    this.renderer.forceContextLoss();
+    if (this.target) {
+      this.target.dispose();
+      ThreeNode.shared.delete(this);
+    } else {
+      this.renderer.dispose();
+      // Browsers allow ~16 live WebGL contexts per page; give this one back now, not at GC.
+      this.renderer.forceContextLoss();
+    }
     for (const fn of this.restore.splice(0)) fn();
     super.onDestroy();
   }

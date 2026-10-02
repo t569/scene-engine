@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- `ThreeNode.sharedRenderer`: many views, one WebGL context. Views made while it is set draw into
+  their own render target (`output`, `version`, `background`) for a host to composite
+  onto its canvas, instead of each holding one of the browser's ~16 contexts. The README has the details.
+- `ThreeNode.setClearColor`: the clear colour kept per view and restored before each shared frame.
+  `scene3d`'s `background` uses it; it was lost on a shared renderer.
+- `scene3d` particles are sized by what they are drawn into, not the renderer's canvas (three's
+  `PointsMaterial` reads the canvas). Unchanged alone; on a shared renderer they were too big.
+- `disposeObject` also disposes textures held in a `ShaderMaterial`'s uniforms. Losing a view's own
+  context used to free them; a shared context keeps them until something disposes them.
+
 - `scene3d`: `bloom` and a `particles` object (`count`, `radius`, `shape`, `size`, `speed`, `colors`), both
   validated and capped (50 000 points per scene). Points move in the vertex shader from the time alone:
   seekable, no CPU per frame, deterministic seeding so a still frame is the same on every load.

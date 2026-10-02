@@ -411,6 +411,26 @@ and every SVG node draws on top of the 3D view: labels, hotspots and controls
 over a product. It measured smoother than a canvas inside the SVG. Use
 `layer: 'inline'` when an SVG node must sit *under* the 3D view in array order.
 
+**Many views, one context.** Browsers allow about 16 WebGL contexts per page,
+and each one costs 150–250 ms to create. A page full of views can share one:
+set `ThreeNode.sharedRenderer` to your own `WebGLRenderer` before the views
+are made. Each view then draws into a render target instead of a canvas of its
+own. Its `canvas` still sits where it always did, transparent, as its box for
+layout and pointer events, and the view's opaque background is moved to
+`view.background` (a CSS colour). The host composites every view in
+`ThreeNode.shared` into the box where `view.canvas` sits, painting the
+background under `view.output`, and redraws only when `view.version` or a box
+has changed. `output` holds final colours, premultiplied: tone-mapped,
+encoded, and blended exactly as the view's own canvas would have been, so
+the host copies it and never converts it. It is half float and not clamped:
+clamp it to 0–1 as a canvas would, or additive layers leave alpha above 1.
+Snap each box to device pixels the way the browser snaps a canvas (corner
+rounded, then size), or fine detail lands a pixel off. The host owns the
+renderer, and destroying a view never disposes it.
+
+A shared renderer's state belongs to whoever drew last, so a view's clear
+colour goes through `view.setClearColor(colour, alpha)`, not the renderer's.
+
 ### `@t569/scene-engine/dicebear`
 
 Adopts a DiceBear SVG string as a node. It takes markup rather than a DiceBear

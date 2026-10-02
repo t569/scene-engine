@@ -38,6 +38,7 @@ import {
   SphereGeometry,
   SpotLight,
   TorusGeometry,
+  Vector2,
   Vector3,
   type Light,
 } from 'three';
@@ -116,7 +117,7 @@ export class Scene3DNode extends ThreeNode {
     const target = spec.camera?.target ?? [0, 0.5, 0];
     this.camera.position.set(...(spec.camera?.position ?? [4, 3, 6]));
     this.camera.lookAt(...target);
-    if (spec.background) this.renderer.setClearColor(spec.background, 1);
+    if (spec.background) this.setClearColor(spec.background, 1);
 
     if ((spec.environment?.preset ?? 'studio') === 'studio') {
       const pmrem = new PMREMGenerator(this.renderer);
@@ -398,19 +399,28 @@ export class Scene3DNode extends ThreeNode {
     const time = { value: 0 };
     this.clouds.push(time);
     const mat = new PointsMaterial({ size: o.size ?? 0.04, vertexColors: true, transparent: true, depthWrite: false, blending: AdditiveBlending });
+    // three sizes points by the renderer's canvas, even when drawing into a target. A shared
+    // renderer's canvas is the host's, so the scale comes from what is being drawn into instead.
+    const scale = { value: 1 };
     mat.onBeforeCompile = (shader) => {
-      Object.assign(shader.uniforms, { uTime: time, uSpeed: { value: o.speed ?? 0.25 }, uRadius: { value: R } });
-      shader.vertexShader = `uniform float uTime, uSpeed, uRadius;\n${shader.vertexShader}`.replace(
-        '#include <begin_vertex>',
-        `float a = position.z + uSpeed * sqrt(uRadius / max(position.x, 0.15 * uRadius)) * uTime;
+      Object.assign(shader.uniforms, { uTime: time, uSpeed: { value: o.speed ?? 0.25 }, uRadius: { value: R }, uScale: scale });
+      shader.vertexShader = `uniform float uTime, uSpeed, uRadius, uScale;\n${shader.vertexShader}`
+        .replace(
+          '#include <begin_vertex>',
+          `float a = position.z + uSpeed * sqrt(uRadius / max(position.x, 0.15 * uRadius)) * uTime;
         vec3 transformed = vec3(position.x * cos(a), position.y + 0.02 * uRadius * sin(2.0 * a), position.x * sin(a));`,
-      );
+        )
+        .replace('( scale / - mvPosition.z )', '( uScale / - mvPosition.z )');
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <color_fragment>',
         '#include <color_fragment>\n\tdiffuseColor.a *= smoothstep(0.5, 0.0, length(gl_PointCoord - 0.5));',
       );
     };
     const points = new Points(geo, mat);
+    const buffer = new Vector2();
+    // Half the height drawn into, per unit of `size` (which three multiplies by the pixel ratio).
+    points.onBeforeRender = (renderer) =>
+      void (scale.value = (0.5 * (renderer.getRenderTarget()?.height ?? renderer.getDrawingBufferSize(buffer).y)) / renderer.getPixelRatio());
     points.frustumCulled = false; // the stored positions aren't where the points are drawn
     return points;
   }
