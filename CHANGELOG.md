@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fix: `disposeObject` on a model copy no longer frees the geometry, materials and textures it
+  shares with the cached glTF, which broke other copies and the next load of that URL.
 - `ThreeNode.sharedRenderer`: many views, one WebGL context. Views made while it is set draw into
   their own render target (`output`, `version`, `background`) for a host to composite
   onto its canvas, instead of each holding one of the browser's ~16 contexts. The README has the details.

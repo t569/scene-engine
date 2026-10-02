@@ -352,16 +352,31 @@ export function mergeStatic(root: Object3D, keep: (o: Object3D) => boolean = () 
   return { before, after: before - merged };
 }
 
-/** Free an object tree's GPU memory: geometries, materials and their textures. */
+/**
+ * Free an object tree's GPU memory: geometries, materials and their textures.
+ * A model copy's geometry, materials and textures belong to the cached glTF
+ * (other copies, the next load of that URL), so those are left alone.
+ */
 export function disposeObject(root: Object3D): void {
+  const cached = new Set<unknown>();
+  const gltfs: GLTF[] = [];
+  root.traverse((o) => {
+    const g = o.userData.gltf as GLTF | undefined;
+    if (g && !gltfs.includes(g)) gltfs.push(g);
+  });
+  for (const g of gltfs) g.scene.traverse((o) => cached.add((o as Mesh).geometry));
+  // The parser records every material and texture it made: variants and assignFinalMaterial's clones too.
+  const isCached = (x: unknown) => cached.has(x) || gltfs.some((g) => g.parser.associations.has(x as Material));
   root.traverse((o) => {
     const mesh = o as Mesh;
-    mesh.geometry?.dispose();
+    if (!isCached(mesh.geometry)) mesh.geometry?.dispose();
     // A light's shadow map: a shared context would keep it (2048² for a sun) after the scene is gone.
     (o as Object3D & { shadow?: { dispose(): void } }).shadow?.dispose();
     const mats = mesh.material ? (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) : [];
     for (const m of mats as Material[]) {
-      for (const v of Object.values(m)) if ((v as Texture | null)?.isTexture) (v as Texture).dispose();
+      if (isCached(m)) continue;
+      // A material cloned from a cached one still shares its textures.
+      for (const v of Object.values(m)) if ((v as Texture | null)?.isTexture && !isCached(v)) (v as Texture).dispose();
       // A shader's textures (a palette, a reference orbit) live in its uniforms. With a context per
       // node, losing the context freed them anyway; a shared context keeps them until disposed.
       const uniforms = (m as Material & { uniforms?: Record<string, { value: unknown } | undefined> }).uniforms ?? {};

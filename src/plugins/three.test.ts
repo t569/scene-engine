@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { BoxGeometry, Group, Mesh, MeshStandardMaterial, SphereGeometry, Vector3, Box3 } from 'three';
-import { ResolutionGovernor, gltfExtensions, mergeStatic, sameOriginOnly } from './three.ts';
+import { BoxGeometry, Group, Texture, Mesh, MeshStandardMaterial, SphereGeometry, Vector3, Box3 } from 'three';
+import { ResolutionGovernor, disposeObject, gltfExtensions, mergeStatic, sameOriginOnly } from './three.ts';
 import { SceneSpecError, validateSceneSpec } from '../parse.ts';
 
 // DOM- and GPU-free: the pure parts of the three plugin, and scene3d validation
@@ -75,6 +75,25 @@ describe('mergeStatic', () => {
     expect(mergeStatic(part, (o) => o === knob)).toEqual({ before: 2, after: 1 });
     expect(knob.children).toHaveLength(2);
     expect(new Vector3().copy(knob.position).length()).toBe(0);
+  });
+});
+
+describe('disposeObject', () => {
+  it("frees a model copy's own resources but not the cached glTF's", () => {
+    const geo = new BoxGeometry();
+    const tex = new Texture();
+    const mat = new MeshStandardMaterial({ map: tex });
+    const variant = new MeshStandardMaterial();
+    const gltf = { scene: new Group().add(new Mesh(geo, mat)), parser: { associations: new Map<unknown, unknown>([[mat, {}], [tex, {}], [variant, {}]]) } };
+    const copy = new Group().add(new Mesh(geo, variant));
+    copy.userData.gltf = gltf;
+    const recoloured = new Mesh(new SphereGeometry(), mat.clone()); // owned material, cached texture
+    const own = new Mesh(new SphereGeometry(), new MeshStandardMaterial());
+    copy.add(recoloured, own);
+    const freed: unknown[] = [];
+    for (const x of [geo, tex, mat, variant, recoloured.geometry, recoloured.material, own.geometry, own.material]) x.addEventListener('dispose', () => freed.push(x));
+    disposeObject(new Group().add(copy));
+    expect(freed).toEqual([recoloured.geometry, recoloured.material, own.geometry, own.material]);
   });
 });
 
