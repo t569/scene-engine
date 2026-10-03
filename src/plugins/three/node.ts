@@ -880,7 +880,9 @@ export class ThreeNode extends BaseObject {
     }
     // A canvas or a composer can only be resized, which reallocates: a few levels, not every step.
     // ponytail: snapped levels; a viewport-aware composer if the resizes still hitch.
-    if (scale < 1) scale = Math.max(this.governor.min, scale > 0.7 ? 0.7 : 0.5);
+    // Down to the governor's floor: stopping at 0.5 left a heavy bloom scene (a ray-marched black
+    // hole on a phone) unable to shed the cost it was asked to.
+    if (scale < 1) scale = Math.max(this.governor.min, [0.7, 0.5, 0.35, 0.25].find((l) => l <= scale) ?? this.governor.min);
     this.outputScale.set(1, 1);
     const ratio = Math.round(base * scale * 100) / 100;
     if (ratio === this.ratio) return scale;
