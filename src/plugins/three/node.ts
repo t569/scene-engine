@@ -418,6 +418,8 @@ export class ThreeNode extends BaseObject {
    * a full-screen view at 2× is millions of pixels a frame). Null: no ceiling.
    */
   static pixelRatioCap: number | null = null;
+  /** Ignore every view's `bloom`: for a host measuring what the glow costs, or a device that can't afford it. */
+  static noBloom = false;
 
   /**
    * Keep the last frame and draw nothing new: for a host taking the view away (dissolving it into
@@ -542,7 +544,7 @@ export class ThreeNode extends BaseObject {
     const floor = opts.minResolution ?? 0.75;
     this.governor = new ResolutionGovernor(Math.min(1, Math.max(opts.minResolution ? 0.1 : 0.5, floor / this.baseRatio())));
     probeFramePeriod();
-    if (opts.bloom) void this.loadBloom(opts.bloom);
+    if (opts.bloom && !ThreeNode.noBloom) void this.loadBloom(opts.bloom);
   }
 
   /** Renderer settings. Shared mode sets them again before each frame: the other nodes have theirs. */
@@ -615,7 +617,9 @@ export class ThreeNode extends BaseObject {
       import('three/addons/postprocessing/OutputPass.js'),
     ]);
     if (this.destroyed) return;
-    const composer = new EffectComposer(this.renderer);
+    // Multisampled, like the plain path's target: the default composer target has none, so every
+    // bloom scene lost its antialiasing (worst on thin lines at reduced resolution).
+    const composer = new EffectComposer(this.renderer, new WebGLRenderTarget(1, 1, { type: HalfFloatType, samples: 4 }));
     composer.renderToScreen = !this.target;
     const bloom = new UnrealBloomPass(new Vector2(1, 1), strength, radius, threshold);
     composer.addPass(new RenderPass(this.world, this.camera));
