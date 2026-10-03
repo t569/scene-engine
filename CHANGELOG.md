@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Fix: bloom views drop to their `minResolution`. A composer's scale snapped to 0.7 or 0.5 whatever the
+  floor, so a heavy bloom scene (a ray-marched black hole on a phone) couldn't shed the cost the governor
+  asked it to. Levels now go 0.7, 0.5, 0.35, 0.25.
+- Fix: bloom views keep their antialiasing. The composer's default target had no MSAA; it now has 4x,
+  like the plain path's.
+- `ThreeNode.noBloom`: ignore every view's `bloom`, for a host measuring what the glow costs or a
+  device that can't afford it.
 - Fix: a view that isn't laid out (`display: none` above it) no longer draws. Chrome's `getScreenCTM`
   answers there with an identity matrix, so the canvas was placed and sized wrongly, and a host showing
   it later showed that frame in the wrong place.
