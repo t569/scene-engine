@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { BoxGeometry, Group, Texture, Mesh, MeshStandardMaterial, SphereGeometry, Vector3, Box3 } from 'three';
-import { ResolutionGovernor, crawling, disposeObject, gltfExtensions, mergeStatic, sameOriginOnly } from './three.ts';
+import { ResolutionGovernor, crawling, disposeObject, frameSignal, gltfExtensions, mergeStatic, sameOriginOnly } from './three.ts';
 import { SceneSpecError, validateSceneSpec } from '../parse.ts';
 
 // DOM- and GPU-free: the pure parts of the three plugin, and scene3d validation
@@ -42,6 +42,19 @@ describe('ResolutionGovernor', () => {
   it('ignores stalls (a tab switch is not a slow GPU)', () => {
     const g = new ResolutionGovernor();
     feed(g, 2000, 100);
+    expect(g.scale).toBe(1);
+  });
+});
+
+describe('frameSignal', () => {
+  it('hears the gap, unless the GPU did under 40% of it: then fewer pixels would not help', () => {
+    expect(frameSignal(33, null)).toBe(33); // no timer: the gap is all there is
+    expect(frameSignal(33, 30)).toBe(33); // GPU-bound: drop resolution
+    expect(frameSignal(33, 4)).toBe(4); // held at 30 Hz, GPU nearly idle: stay sharp
+    expect(frameSignal(33, 0)).toBe(33); // no measurement yet
+    // Fed to the governor, a 30 Hz page that costs the GPU 4 ms keeps full resolution.
+    const g = new ResolutionGovernor(0.5);
+    for (let i = 0; i < 200; i++) g.sample(frameSignal(33, 4));
     expect(g.scale).toBe(1);
   });
 });

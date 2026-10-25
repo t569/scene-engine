@@ -14,6 +14,7 @@ export {
   ResolutionGovernor,
   configureLoaders,
   crawling,
+  frameSignal,
   disposeObject,
   gltfExtensions,
   instantiate,

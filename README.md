@@ -404,6 +404,15 @@ view.onFrame((dt) => { spinner.rotation.y += dt; return true; }); // true = I mo
   fetched only when a file needs it. KTX2 and Draco need their decoder files
   hosted: `configureLoaders({ ktx2TranscoderPath, dracoDecoderPath })` (three
   ships both under `examples/jsm/libs/`). Parsed models are cached per URL.
+- **No first-sight stalls.** `view.warm()` compiles every shader and uploads every
+  texture in the world up front, hidden objects and ones the camera hasn't faced
+  yet included; `scene3d` does it before `ready` resolves. Otherwise each would
+  stall the frame it first appears in, mid-scroll.
+- **Resolution changes are cheap or rare.** Shared views change by viewport. A
+  view with its own canvas reallocates on each change, so it changes at most
+  every 500 ms, and with bloom or a `finish` only the composer resizes (its last
+  pass scales the frame up into a canvas that keeps its size). The governor
+  drops resolution only when the GPU timer says the GPU is the bottleneck.
 - **Pauses off screen**; frees GPU memory and its WebGL context on destroy.
 - **Glow on request.** `bloom: { strength, radius, threshold }` bleeds light
   from anything brighter than `threshold` (three's UnrealBloomPass). The

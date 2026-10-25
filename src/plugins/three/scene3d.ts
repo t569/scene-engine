@@ -171,10 +171,13 @@ export class Scene3DNode extends ThreeNode {
     for (const l of lights) this.addLight(l, floorSize);
 
     for (const o of spec.objects) this.world.add(this.build(o, loads));
-    this.ready = Promise.all(loads).then(() => {
-      this.invalidate('world');
-      this.repaint();
-    });
+    // Ready means on the GPU too: compiled and uploaded, so the first scroll past anything doesn't stall.
+    this.ready = Promise.all(loads)
+      .then(() => this.warm())
+      .then(() => {
+        this.invalidate('world');
+        this.repaint();
+      });
 
     const cam = spec.camera ?? {};
     for (const [key, src] of Object.entries(cam.bind ?? {})) {

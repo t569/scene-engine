@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- Scroll smoothness, measured by wheel-scrolling three showcase pages on an integrated GPU (slowest
+  5% of frames: 116 → 50 ms, 83 → 34 ms, 67 → 34 ms; worst stall 1.1 s → under 0.2 s):
+  - Fix: own-canvas views resized up to 100 times in ten seconds of scrolling: resolution flipped
+    between moving and settling frame by frame in the tail of every eased scroll, and each flip
+    reallocated the canvas and every composer target. Changes are now at most every 500 ms.
+  - With bloom or a `finish`, the canvas no longer resizes with the resolution at all, only the
+    composer, once per change (it was resized twice: `setPixelRatio`, then `setSize`); and such a
+    canvas is made without MSAA, which the composer's own target already does.
+  - Settling sharpens straight to full resolution when affordable, not in up to three resizes.
+  - `warm()` works for every view, not only shared ones, and uploads every texture as well as
+    compiling every program; scene3d warms before `ready`. Shaders and textures of things off camera
+    were compiled and uploaded mid-scroll, the frame they first came into view.
+- Fix: the governor lowered the resolution for frames that were late for reasons other than the GPU
+  (a page held at 30 Hz, a busy main thread), blurring a picture that cost the GPU 4 ms. Where the
+  browser has GPU timers it now only drops when the GPU took at least 40% of the frame
+  (`frameSignal()`).
 - Fix: the resolution governor never ran for a still camera over animated content (a live screen, a
   shader, particles). A quaternion's angle to itself comes back as ~1e-8, not 0, so every such frame read
   as the tail of a camera glide and was drawn sharp, unsampled. A restaurant page at 38 ms a frame stayed

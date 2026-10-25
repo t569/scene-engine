@@ -101,8 +101,8 @@ interface Composer {
   render(): void;
   /** The finished frame, when it renders off screen (shared mode). */
   readonly texture: Texture;
-  setPixelRatio(r: number): void;
-  setSize(w: number, h: number): void;
+  /** Size and pixel ratio together: every pass reallocates its targets on a resize, so one, not two. */
+  resize(w: number, h: number, ratio: number): void;
   dispose(): void;
 }
 type EffectComposer = import('three/addons/postprocessing/EffectComposer.js').EffectComposer;
@@ -185,6 +185,17 @@ export class ResolutionGovernor {
     }
     return false;
   }
+}
+
+/**
+ * What the governor hears about a frame: the gap the reader saw, unless the GPU timer says the GPU
+ * spent under 40% of it drawing. Then the frame was late for some other reason (a busy main thread, a
+ * browser holding the page at 30 Hz), fewer pixels would not have made it sooner, and lowering the
+ * resolution only blurs the picture: a phone page at 4 ms of GPU work in 33 ms frames sat at half
+ * resolution. The margin is for drivers whose timers under-report (ANGLE on Direct3D 11). Pure.
+ */
+export function frameSignal(gap: number, gpu: number | null): number {
+  return gpu !== null && gpu > 0 && gpu < gap * 0.4 ? gpu : gap;
 }
 
 /**
@@ -419,6 +430,13 @@ const SETTLE_MS = 150;
 const SHARPEN_MS = 250;
 /** Shared mode: one GPU queue for every view and the composite, so a sharpening frame stalls them all. */
 const SHARPEN_SHARED_MS = 50;
+/**
+ * A canvas or composer view may change resolution at most this often: each change reallocates its
+ * buffers (tens of ms with MSAA and bloom). Unlimited, the tail of every eased scroll flipped between
+ * sharp (a camera gliding to a stop) and reduced (moving) frame by frame: 104 reallocations in ten
+ * seconds of wheel scrolling, each a hitch. Shared views change by viewport, for free, and aren't held.
+ */
+const RESIZE_MS = 500;
 let hostRuleAdded = false;
 
 export class ThreeNode extends BaseObject {
@@ -475,6 +493,9 @@ export class ThreeNode extends BaseObject {
   private observer: IntersectionObserver | null = null;
   private cssSize = { w: 0, h: 0 };
   private ratio = 0;
+  /** The canvas's own size and ratio as last set, and when the resolution last changed. */
+  private canvasAt = '';
+  private resizedAt = 0;
   private placed = '';
   private lastOpacity = '';
   private streak = 0;
@@ -552,7 +573,10 @@ export class ThreeNode extends BaseObject {
     }
 
     const shared = ThreeNode.sharedRenderer;
-    this.renderer = shared ?? new WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: true, powerPreference: 'high-performance' });
+    // A view with post-processing antialiases in the composer's own target and only copies to its
+    // canvas at the end: a multisampled canvas would be memory and bandwidth for nothing.
+    const composed = !!((opts.bloom && !ThreeNode.noBloom) || opts.finish);
+    this.renderer = shared ?? new WebGLRenderer({ canvas: this.canvas, antialias: !composed, alpha: true, powerPreference: 'high-performance' });
     if (shared) {
       // three tone-maps and encodes only into the screen and XR targets; into any other target it
       // writes linear light, and translucent layers then blend in linear space: a different picture,
@@ -611,14 +635,19 @@ export class ThreeNode extends BaseObject {
   }
 
   /**
-   * Shared mode: compile this view's shaders ahead of its first frame, for a view a host keeps
-   * hidden but will show soon: compiled on first draw instead, the program link stalls that frame
-   * (100–200 ms, mid-transition). The programs are the ones the view will draw with: compiled with
-   * its own renderer settings, into its target, or (with bloom) into a target like the composer's.
-   * Uses parallel compilation where the driver has it. Content added later compiles when drawn.
+   * Get everything in the world onto the GPU before it is needed: every shader compiled and every
+   * texture uploaded, hidden objects and ones the camera hasn't turned to yet included. Left to the
+   * first frame that shows them, each program link stalls that frame 100–200 ms and each texture its
+   * upload: mid-scroll, when the camera first faces a pot or a cloud appears (a one-second stall on a
+   * restaurant page). The programs are the ones the view will draw with: its own renderer settings,
+   * into its target, or (with bloom or a finish) into a target like the composer's, so it waits for
+   * the composer's code first. Parallel compilation where the driver has it. scene3d calls this before
+   * `ready` resolves; call it yourself after building a world by code. Content added later compiles
+   * when drawn.
    */
-  warm(): Promise<void> {
-    if (!this.target || this.destroyed) return Promise.resolve();
+  async warm(): Promise<void> {
+    await this.composing;
+    if (this.destroyed) return;
     const r = this.renderer;
     const prev = r.getRenderTarget();
     this.configure();
@@ -627,17 +656,33 @@ export class ThreeNode extends BaseObject {
     r.setRenderTarget(plain ?? this.target);
     const done = r.compileAsync(this.world, this.camera);
     r.setRenderTarget(prev);
-    // Then one frame into a 1x1 target: it uploads the geometry and textures, which the first real
-    // frame would otherwise do mid-transition (tens of MB for a dense mesh). Its pixel is not shown.
-    const upload = () => {
-      if (this.destroyed || this.version) return;
+    const textures = new Set<Texture>();
+    this.world.traverse((o) => {
+      const m = (o as Mesh).material;
+      for (const mat of m ? (Array.isArray(m) ? m : [m]) : []) {
+        for (const v of Object.values(mat)) if ((v as Texture | null)?.isTexture) textures.add(v as Texture);
+        const uniforms = (mat as Material & { uniforms?: Record<string, { value: unknown } | undefined> }).uniforms ?? {};
+        for (const u of Object.values(uniforms)) if ((u?.value as Texture | null)?.isTexture) textures.add(u!.value as Texture);
+      }
+    });
+    // A render target's texture is already on the GPU; initTexture would only reallocate it.
+    for (const t of textures) if (!(t as Texture & { isRenderTargetTexture?: boolean }).isRenderTargetTexture) r.initTexture(t);
+    try {
+      await done;
+    } catch {
+      /* a program that fails will say so when drawn */
+    }
+    // Shared mode: then one frame into a 1x1 target, which uploads the geometry too (tens of MB for a
+    // dense mesh, otherwise mid-transition). Its pixel is not shown. A view of its own needn't: its
+    // canvas draws again on the next frame anyway.
+    if (this.target && !this.destroyed && !this.version) {
       const before = r.getRenderTarget();
       this.configure();
       r.setRenderTarget(plain ?? this.target);
       r.render(this.world, this.camera);
       r.setRenderTarget(before);
-    };
-    return done.then(upload, () => {}).finally(() => plain?.dispose());
+    }
+    plain?.dispose();
   }
 
   /**
@@ -694,8 +739,11 @@ export class ThreeNode extends BaseObject {
       get texture() {
         return composer.readBuffer.texture;
       },
-      setPixelRatio: (r) => composer.setPixelRatio(r),
-      setSize: (w, h) => composer.setSize(w, h),
+      resize: (w, h, r) => {
+        // setPixelRatio() is itself a full resize; setting the ratio first makes setSize the only one.
+        (composer as unknown as { _pixelRatio: number })._pixelRatio = r;
+        composer.setSize(w, h);
+      },
       dispose: () => {
         for (const p of composer.passes) p.dispose();
         composer.dispose();
@@ -863,7 +911,7 @@ export class ThreeNode extends BaseObject {
       // The gap between frames: what the reader sees. (GPU timer queries under-report on some
       // drivers, ANGLE on Direct3D 11 among them.) Judged against the display's own frame period.
       this.governor.budget = Math.max(GOVERNOR_BUDGET, framePeriod * 1.2);
-      if (busy && this.streak > 2) this.governor.sample(now - this.lastRender);
+      if (busy && this.streak > 2) this.governor.sample(frameSignal(now - this.lastRender, this.timer ? this.lastCost : null));
       const auto = (this.opts.quality ?? 'auto') !== 'high';
       const moving = auto && now < this.movingUntil;
       this.drawFrame(moving ? this.governor.min : busy && auto ? this.governor.scale : 1);
@@ -875,9 +923,12 @@ export class ThreeNode extends BaseObject {
       // cost, scaled by the pixels the step adds, stays affordable. Cheap views reach full
       // resolution in a few frames; one whose sharp frame would take seconds (a deep fractal)
       // stops short instead of tripping the GPU watchdog, which kills the context.
+      // Straight to full when that is affordable: each step of a canvas or composer reallocates, and
+      // three steps after every scroll were three hitches just as the picture came to rest.
       if (this.lowRes && performance.now() - this.lastRender > SETTLE_MS) {
-        const next = Math.min(1, this.drawnScale * 1.6);
-        if (this.lastCost * (next / this.drawnScale) ** 2 <= (this.target ? SHARPEN_SHARED_MS : SHARPEN_MS)) this.drawFrame(next);
+        const limit = this.target ? SHARPEN_SHARED_MS : SHARPEN_MS;
+        const next = this.lastCost / this.drawnScale ** 2 <= limit ? 1 : Math.min(1, this.drawnScale * 1.6);
+        if (this.lastCost * (next / this.drawnScale) ** 2 <= limit) this.drawFrame(next);
         else this.lowRes = false; // as sharp as this view affords
       }
     }
@@ -897,7 +948,9 @@ export class ThreeNode extends BaseObject {
     const finish = this.fx?.finish;
     if (finish) {
       finish.uniforms.uTime!.value = this.scene?.elapsed ?? 0;
-      finish.uniforms.uResolution!.value = [Math.max(1, this.cssSize.w * this.ratio), Math.max(1, this.cssSize.h * this.ratio)];
+      // In the output's pixels (the canvas's, at full ratio), so grain keeps its size as resolution moves.
+      const out = this.target ? this.ratio : this.baseRatio();
+      finish.uniforms.uResolution!.value = [Math.max(1, this.cssSize.w * out), Math.max(1, this.cssSize.h * out)];
     }
     if (this.composer) this.composer.render();
     else this.renderer.render(this.world, this.camera);
@@ -944,7 +997,8 @@ export class ThreeNode extends BaseObject {
       this.outputScale.set(sw / fw, sh / fh);
       return scale;
     }
-    // A canvas or a composer can only be resized, which reallocates: a few levels, not every step.
+    // A canvas or a composer can only be resized, which reallocates: a few levels, not every step,
+    // and not more often than RESIZE_MS (a new size, ratio 0, always goes through).
     // ponytail: snapped levels; a viewport-aware composer if the resizes still hitch.
     // Down to the governor's floor: stopping at 0.5 left a heavy bloom scene (a ray-marched black
     // hole on a phone) unable to shed the cost it was asked to.
@@ -952,14 +1006,23 @@ export class ThreeNode extends BaseObject {
     this.outputScale.set(1, 1);
     const ratio = Math.round(base * scale * 100) / 100;
     if (ratio === this.ratio) return scale;
+    const now = performance.now();
+    if (this.ratio !== 0 && now - this.resizedAt < RESIZE_MS) return this.ratio / base;
     this.ratio = ratio;
-    // With bloom the composer draws into its own targets; this one stays unused at 1x1.
+    this.resizedAt = now;
+    // The canvas: with a composer it stays at full resolution, as the composer's last pass draws a
+    // full-window quad into it and so scales a reduced frame up by itself; only the composer resizes.
+    // Without one, the canvas is the frame. (In shared mode it has no context to size.)
     if (!this.target) {
-      this.renderer.setPixelRatio(ratio);
-      this.renderer.setSize(w, h, false);
+      const canvasRatio = this.composer ? base : ratio;
+      const at = `${w}x${h}@${canvasRatio}`;
+      if (at !== this.canvasAt) {
+        this.renderer.setPixelRatio(canvasRatio);
+        this.renderer.setSize(w, h, false);
+        this.canvasAt = at;
+      }
     }
-    this.composer?.setPixelRatio(ratio);
-    this.composer?.setSize(w, h);
+    this.composer?.resize(w, h, ratio);
     return scale;
   }
 
