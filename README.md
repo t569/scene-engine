@@ -356,9 +356,10 @@ driven by the same params as the 2D nodes around it:
 | `finish` | `{ grain, vignette, aberration }`: film grain, vignette and colour fringes in one pass after tone mapping; loads like bloom |
 | `shadows` | `soft` (default), `sharp`, `none`; `floor: { shadow, size }` or `false` |
 | `lights` | ≤ 16 of `directional`, `point`, `spot`, `ambient`, `hemisphere`; ≤ 4 cast shadows; `bind` (`intensity`, `position.*`), `visible_when` |
-| `objects` | ≤ 500 of `model`, `box` (`radius` rounds it), `sphere`, `cylinder`, `plane`, `torus`, `particles`, `group` (`merge: true` for static detail) |
+| `objects` | ≤ 500 of `model`, `box` (`radius` rounds it), `sphere`, `cylinder`, `plane`, `torus`, `particles`, `instances`, `group` (`merge: true` for static detail) |
 | per object | `position`, `rotation` (degrees), `scale`, `castShadow`, `receiveShadow`, `bind` (`position.*`, `rotation.*`, `scale`), `visible_when`, `on_click`, `on_hover` (params set while hovered, restored on leave) |
 | `model` | `src`, `fit` + `fitAxis`, `center`, `variant`, `variant_by`, `animation`; `parts: { name: { bind, visible_when, material } }` drives named nodes inside the model, `bind` as offsets from each part's rest pose |
+| `instances` | `count` (≤ 20 000 per scene), `shape` (`sphere`, `box`, `cylinder`), `size`, `jitter`, `scatter: { shape: heap \| disc \| box, radius, height, size }`, `seed`, `colors`, `material`; `fall: { height, speed, spin }` drops and tumbles them on the GPU: grains, seeds, spices |
 | `particles` | `count` (≤ 50 000 per scene), `radius`, `shape` (`disc`, `shell`), `size`, `speed`, `colors` (≤ 8): glowing points circling the y axis, moved on the GPU as a function of time, so they seek and cost no CPU per frame |
 | `bloom` | `{ strength, radius, threshold }`: glow, as below; the code loads only when set |
 | `material` | `color`, `color_by`, `roughness`, `metalness`, `emissive`, `emissiveIntensity`, `opacity`, `clearcoat`, `transmission`, `flatShading`, `side` |

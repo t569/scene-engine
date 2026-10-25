@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { BoxGeometry, Group, Texture, Mesh, MeshStandardMaterial, SphereGeometry, Vector3, Box3 } from 'three';
-import { ResolutionGovernor, disposeObject, gltfExtensions, mergeStatic, sameOriginOnly } from './three.ts';
+import { ResolutionGovernor, crawling, disposeObject, gltfExtensions, mergeStatic, sameOriginOnly } from './three.ts';
 import { SceneSpecError, validateSceneSpec } from '../parse.ts';
 
 // DOM- and GPU-free: the pure parts of the three plugin, and scene3d validation
@@ -43,6 +43,16 @@ describe('ResolutionGovernor', () => {
     const g = new ResolutionGovernor();
     feed(g, 2000, 100);
     expect(g.scale).toBe(1);
+  });
+});
+
+describe('crawling', () => {
+  it('a still camera is not crawling, even when its angle to itself is float noise', () => {
+    expect(crawling(0, 0, 8)).toBe(false);
+    expect(crawling(1.49e-8, 0, 8)).toBe(false); // what Quaternion.angleTo gives for the same rotation
+    expect(crawling(0.001, 0, 8)).toBe(true); // the tail of an orbit's ease-out
+    expect(crawling(0, 0.01, 8)).toBe(true);
+    expect(crawling(0.05, 0, 8)).toBe(false); // turning: not a tail
   });
 });
 
@@ -218,6 +228,15 @@ describe('scene3d validation', () => {
     bad(scene3d({ finish: { grain: 4 } }), /finish\.grain/);
     bad(scene3d({ minResolution: 0.01 }), /minResolution must be a number from 0.25 to 1/);
     bad(scene3d({ objects: [{ type: 'model', src: 'a.glb', parts: { lid: { bind: { 'material.color': '1' } } } }] }), /parts\.lid\.bind\.material\.color is not bindable/);
+  });
+
+  it('takes seeded scatters and falling grains, and caps the copies', () => {
+    const cumin = { type: 'instances', count: 4000, shape: 'sphere', size: [0.05, 0.02, 0.02], scatter: { shape: 'heap', radius: 0.6, height: 0.25 }, colors: ['#8a5a2b', '#a87440'] };
+    expect(() => ok(scene3d({ objects: [cumin, { ...cumin, scatter: { shape: 'box', size: [4, 0, 4] }, fall: { height: 3, speed: 0.8, spin: 1 } }] }))).not.toThrow();
+    bad(scene3d({ objects: [cumin, { ...cumin, count: 16_001 }] }), /more than 20000 instances/);
+    bad(scene3d({ objects: [{ ...cumin, shape: 'teapot' }] }), /shape must be one of sphere, box, cylinder/);
+    bad(scene3d({ objects: [{ ...cumin, scatter: { shape: 'cloud' } }] }), /scatter\.shape must be one of heap, disc, box/);
+    bad(scene3d({ objects: [{ ...cumin, fall: { height: 0 } }] }), /fall\.height must be a positive number/);
   });
 
   it('takes hover as data, checked like clicks', () => {

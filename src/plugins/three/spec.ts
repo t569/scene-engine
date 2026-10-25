@@ -140,7 +140,35 @@ export interface ParticlesObject extends Object3DBase {
   colors?: string[];
 }
 
-export type Object3DSpec = ModelObject | BoxObject | SphereObject | CylinderObject | PlaneObject | TorusObject | ParticlesObject | GroupObject;
+/**
+ * Many copies of one small shape in one draw call: grains in a heap, seeds on a board, spices
+ * raining down. Placed from a seed, so the same spec gives the same heap on every load. With
+ * `fall`, each copy drops and tumbles through `height` and comes round again: worked out on the GPU
+ * from the clock alone, so it seeks and costs no CPU per frame (and casts no shadow while falling).
+ */
+export interface InstancesObject extends Object3DBase {
+  type: 'instances';
+  count: number;
+  /** One grain: `sphere` (squash it with `size`), `box`, `cylinder` (a thread, a stick). */
+  shape: 'sphere' | 'box' | 'cylinder';
+  /** One grain's size, x y z. */
+  size: Vec3;
+  /** Each grain's size varies by up to this fraction. Default 0.3. */
+  jitter?: number;
+  /**
+   * Where they go. `heap`: a mound (`radius` across, `height` high at the middle). `disc`: flat,
+   * `radius`. `box`: anywhere in `size`. Grains lie at random angles in all three.
+   */
+  scatter: { shape: 'heap' | 'disc' | 'box'; radius?: number; height?: number; size?: Vec3 };
+  /** Drop through `height` units at `speed` units/s, tumbling `spin` turns/s. */
+  fall?: { height: number; speed?: number; spin?: number };
+  seed?: number;
+  /** Each grain takes one of these (multiplied with the material colour). */
+  colors?: string[];
+  material?: Material3D;
+}
+
+export type Object3DSpec = ModelObject | BoxObject | SphereObject | CylinderObject | PlaneObject | TorusObject | ParticlesObject | InstancesObject | GroupObject;
 
 export interface Light3D {
   type: 'directional' | 'point' | 'spot' | 'ambient' | 'hemisphere';
@@ -239,6 +267,8 @@ export const LIMITS_3D = {
   pathPoints: 64,
   /** Named parts driven on one model. */
   parts: 64,
+  /** Copies across all `instances` objects in one scene. */
+  instances: 20_000,
 } as const;
 
 /* -------------------------------------------------------------- validation */
@@ -401,6 +431,7 @@ export function validateScene3D(node: Record<string, unknown>, at: string, ctx: 
   if (!Array.isArray(node.objects)) fail(`${at}.objects must be a list`);
   let count = 0;
   let points = 0;
+  let copies = 0;
   const material = (m: unknown, w: string) => {
     if (m === undefined) return;
     if (!isRecord(m)) fail(`${w} must be an object`);
@@ -513,13 +544,40 @@ export function validateScene3D(node: Record<string, unknown>, at: string, ctx: 
         range(ob.speed, `${w}.speed`, -10, 10);
         if (ob.colors !== undefined) palette(ob.colors, `${w}.colors`, LIMITS_3D.particleColors, (x, cw) => ctx.checkColor(x, cw));
         return;
+      case 'instances': {
+        if (!(num(ob.count) && Number.isInteger(ob.count) && ob.count >= 1)) fail(`${w}.count must be a whole number, at least 1`);
+        copies += ob.count as number;
+        if (copies > LIMITS_3D.instances) fail(`${at}: more than ${LIMITS_3D.instances} instances in total`);
+        oneOf(ob.shape, `${w}.shape`, ['sphere', 'box', 'cylinder']);
+        if (ob.shape === undefined) fail(`${w}.shape is required`);
+        if (!(Array.isArray(ob.size) && ob.size.length === 3 && ob.size.every((n) => num(n) && n > 0))) fail(`${w}.size must be [x, y, z], all positive`);
+        range(ob.jitter, `${w}.jitter`, 0, 1);
+        if (!isRecord(ob.scatter)) fail(`${w}.scatter must be { shape, radius?, height?, size? }`);
+        const sc = ob.scatter as Record<string, unknown>;
+        oneOf(sc.shape, `${w}.scatter.shape`, ['heap', 'disc', 'box']);
+        if (sc.shape === undefined) fail(`${w}.scatter.shape is required`);
+        range(sc.radius, `${w}.scatter.radius`, 0, 1e4);
+        range(sc.height, `${w}.scatter.height`, 0, 1e4);
+        if (sc.size !== undefined && !(Array.isArray(sc.size) && sc.size.length === 3 && sc.size.every((n) => num(n) && n >= 0))) fail(`${w}.scatter.size must be [x, y, z]`);
+        if (ob.fall !== undefined) {
+          if (!isRecord(ob.fall)) fail(`${w}.fall must be { height, speed?, spin? }`);
+          const f = ob.fall as Record<string, unknown>;
+          positive(f.height, `${w}.fall.height`);
+          range(f.speed, `${w}.fall.speed`, -100, 100);
+          range(f.spin, `${w}.fall.spin`, 0, 20);
+        }
+        range(ob.seed, `${w}.seed`, 0, 2 ** 32);
+        if (ob.colors !== undefined) palette(ob.colors, `${w}.colors`, LIMITS_3D.particleColors, (x, cw) => ctx.checkColor(x, cw));
+        material(ob.material, `${w}.material`);
+        return;
+      }
       case 'group':
         if (!Array.isArray(ob.children)) fail(`${w}.children must be a list`);
         bool(ob.merge, `${w}.merge`);
         (ob.children as unknown[]).forEach((c, i) => object(c, `${w}.children[${i}]`, depth + 1));
         return;
       default:
-        fail(`${w}.type must be one of model, box, sphere, cylinder, plane, torus, particles, group`);
+        fail(`${w}.type must be one of model, box, sphere, cylinder, plane, torus, particles, instances, group`);
     }
   };
   (node.objects as unknown[]).forEach((o, i) => object(o, `${at}.objects[${i}]`, 0));

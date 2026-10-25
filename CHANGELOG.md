@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Fix: the resolution governor never ran for a still camera over animated content (a live screen, a
+  shader, particles). A quaternion's angle to itself comes back as ~1e-8, not 0, so every such frame read
+  as the tail of a camera glide and was drawn sharp, unsampled. A restaurant page at 38 ms a frame stayed
+  at full resolution; it now drops to its floor (20 ms). `crawling()` is the pure test.
+- Fix: the display's frame period, which sets the governor's budget, was taken from the first 30 frames
+  after the first view, the page's busiest moment: a page loading models read as a 25 Hz display and
+  allowed 48 ms a frame. Any shorter gap over the next ~10 s now lowers it.
+- scene3d `instances`: many copies of one small shape in one draw call, scattered from a seed (`heap`,
+  `disc`, `box`), with per-copy colours; `fall` drops and tumbles them on the GPU as a function of time,
+  so they seek. Capped at 20 000 per scene. `disposeObject` frees an InstancedMesh's own buffers.
 - scene3d, cinematic: `camera.path` (a flight on a curve at `along`, an expression; point k of n at
   `along = k / (n - 1)`) and `camera.bind`, so a scroll-driven camera is data and seeks; `environment.src`
   (an .hdr, with `background`, `blur`, `rotation`); `fog`; `exposure`; `finish` (grain, vignette, colour

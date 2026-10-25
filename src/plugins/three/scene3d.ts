@@ -22,11 +22,14 @@ import {
   BufferGeometry,
   CatmullRomCurve3,
   DoubleSide,
+  Euler,
   Fog,
   FrontSide,
   Group,
   HemisphereLight,
+  InstancedMesh,
   MathUtils,
+  Matrix4,
   Mesh,
   MeshPhysicalMaterial,
   MeshStandardMaterial,
@@ -37,6 +40,7 @@ import {
   Points,
   PointsMaterial,
   PropertyBinding,
+  Quaternion,
   ShadowMaterial,
   SphereGeometry,
   SpotLight,
@@ -52,7 +56,7 @@ import { compile, usesTime, type Compiled } from '../../expr.ts';
 import type { BuildContext } from '../../registry.ts';
 import type { VisibleWhen } from '../../types.ts';
 import { ThreeNode, instantiate, loadGLTF, mergeStatic, sameOriginOnly } from './node.ts';
-import type { Light3D, Material3D, Object3DSpec, ParticlesObject, PartSpec, Scene3DSpec, Vec3 } from './spec.ts';
+import type { InstancesObject, Light3D, Material3D, Object3DSpec, ParticlesObject, PartSpec, Scene3DSpec, Vec3 } from './spec.ts';
 
 /** `f` is what's tested; `src` the compiled expression (for `usesTime`). */
 type Condition = { f: Compiled; src: Compiled; min: number; max: number };
@@ -89,6 +93,16 @@ async function applyVariant(root: Object3D, gltf: GLTF, name: string): Promise<v
     );
   });
   await Promise.all(jobs);
+}
+
+/** mulberry32: a small seeded generator, so a scatter is the same on every load. */
+function seeded(seed: number): () => number {
+  return () => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }
 
 export class Scene3DNode extends ThreeNode {
@@ -396,6 +410,9 @@ export class Scene3DNode extends ThreeNode {
       case 'particles':
         obj = this.particles(o);
         break;
+      case 'instances':
+        obj = this.instances(o);
+        break;
       case 'group':
         obj = new Group();
         for (const c of o.children) obj.add(this.build(c, loads));
@@ -436,7 +453,9 @@ export class Scene3DNode extends ThreeNode {
     if (o.position) obj.position.set(...o.position);
     if (o.rotation) obj.rotation.set(...(o.rotation.map((d) => MathUtils.degToRad(d)) as [number, number, number]));
     if (o.scale !== undefined) typeof o.scale === 'number' ? obj.scale.setScalar(o.scale) : obj.scale.set(...o.scale);
-    if (o.type !== 'model' && o.type !== 'particles') this.shadowsOf(obj, o.castShadow ?? true, o.receiveShadow ?? true);
+    // Falling grains move in the vertex shader; the shadow pass doesn't know, so they cast none.
+    const falls = o.type === 'instances' && !!o.fall;
+    if (o.type !== 'model' && o.type !== 'particles') this.shadowsOf(obj, o.castShadow ?? !falls, o.receiveShadow ?? !falls);
     if (o.id) obj.name = o.id;
     for (const [key, src] of Object.entries(o.bind ?? {})) {
       if (key === 'scale') {
@@ -505,19 +524,84 @@ export class Scene3DNode extends ThreeNode {
     };
   }
 
+  /** A seeded scatter of one shape, in one InstancedMesh; `fall` moves it on the GPU. See spec.ts. */
+  private instances(o: InstancesObject): InstancedMesh {
+    const rand = seeded((o.seed ?? 1) ^ o.count);
+    // Grains are a few pixels across: coarse shapes (a 7×5 sphere is 50 triangles), as 10 000 of them add up.
+    const geo =
+      o.shape === 'box' ? new BoxGeometry(1, 1, 1) : o.shape === 'cylinder' ? new CylinderGeometry(0.5, 0.5, 1, 5, 1, true) : new SphereGeometry(0.5, 7, 5);
+    const mat = this.material(o.material);
+    const mesh = new InstancedMesh(geo, mat, o.count);
+    const { shape, radius = 1, height = radius * 0.5, size = [1, 1, 1] } = o.scatter;
+    const jitter = o.jitter ?? 0.3;
+    const palette = o.colors?.map((c) => new Color(c));
+    const m = new Matrix4();
+    const q = new Quaternion();
+    const e = new Euler();
+    const p = new Vector3();
+    const sc = new Vector3();
+    for (let i = 0; i < o.count; i++) {
+      if (shape === 'box') p.set((rand() - 0.5) * size[0], (rand() - 0.5) * size[1], (rand() - 0.5) * size[2]);
+      else {
+        const r = radius * Math.sqrt(rand());
+        const a = rand() * Math.PI * 2;
+        // A heap: higher in the middle, a dome (1 - r²), and grains anywhere below its skin.
+        const y = shape === 'heap' ? height * (1 - (r / radius) ** 2) * Math.sqrt(rand()) : 0;
+        p.set(r * Math.cos(a), y, r * Math.sin(a));
+      }
+      e.set(rand() * Math.PI * 2, rand() * Math.PI * 2, rand() * Math.PI * 2);
+      const k = 1 + (rand() * 2 - 1) * jitter;
+      sc.set(o.size[0] * k, o.size[1] * k, o.size[2] * k);
+      mesh.setMatrixAt(i, m.compose(p, q.setFromEuler(e), sc));
+      if (palette) mesh.setColorAt(i, palette[Math.floor(rand() * palette.length)]!);
+    }
+    if (o.fall) {
+      const time = { value: 0 };
+      this.clouds.push(time);
+      const { height: H, speed = 1, spin = 0.5 } = o.fall;
+      mat.onBeforeCompile = (shader) => {
+        Object.assign(shader.uniforms, { uTime: time, uFall: { value: [H, speed, spin * Math.PI * 2] } });
+        shader.vertexShader = `uniform float uTime; uniform vec3 uFall;
+mat3 tumble(float a, vec3 k) { k = normalize(k); float c = cos(a), s = sin(a);
+  return mat3(c + k.x*k.x*(1.0-c), k.y*k.x*(1.0-c) + k.z*s, k.z*k.x*(1.0-c) - k.y*s,
+              k.x*k.y*(1.0-c) - k.z*s, c + k.y*k.y*(1.0-c), k.z*k.y*(1.0-c) + k.x*s,
+              k.x*k.z*(1.0-c) + k.y*s, k.y*k.z*(1.0-c) - k.x*s, c + k.z*k.z*(1.0-c)); }
+${shader.vertexShader}`
+          .replace(
+            '#include <beginnormal_vertex>',
+            `float h = fract(sin(float(gl_InstanceID) * 12.9898) * 43758.5453);
+  mat3 spinM = tumble(uTime * uFall.z * (0.5 + h), vec3(h - 0.5, 0.7, fract(h * 7.0) - 0.5));
+  vec3 objectNormal = spinM * normal;`,
+          )
+          .replace('#include <begin_vertex>', 'vec3 transformed = spinM * position;')
+          .replace(
+            '#include <project_vertex>',
+            // Each grain's own drop speed varies a little; it falls from the top of its span and wraps.
+            // Not "im": three's instanced normal chunk already declares one.
+            `mat4 fallM = instanceMatrix;
+  fallM[3].y = mod(fallM[3].y - uTime * uFall.y * (0.75 + 0.5 * h), uFall.x);
+  vec4 mvPosition = modelViewMatrix * fallM * vec4(transformed, 1.0);
+  gl_Position = projectionMatrix * mvPosition;`,
+          );
+      };
+      mesh.frustumCulled = false; // the stored positions aren't where the grains are drawn
+      // Stored heights spread over the span the shader wraps them in.
+      for (let i = 0; i < o.count; i++) {
+        mesh.getMatrixAt(i, m);
+        m.elements[13] = rand() * H;
+        mesh.setMatrixAt(i, m);
+      }
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    return mesh;
+  }
+
   /**
    * Each point is stored as (ring radius, height, start angle); the vertex shader turns it to
    * angle + ω·t, ω falling off with the radius. Seeded, so a still frame is the same every load.
    */
   private particles(o: ParticlesObject): Points {
-    let seed = 0x9e3779b9 ^ o.count;
-    const rand = () => {
-      // mulberry32
-      seed = (seed + 0x6d2b79f5) | 0;
-      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
+    const rand = seeded(0x9e3779b9 ^ o.count);
     const R = o.radius;
     const palette = (o.colors ?? ['#ffffff']).map((c) => new Color(c));
     const pos = new Float32Array(o.count * 3);

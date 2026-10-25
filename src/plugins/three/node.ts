@@ -121,9 +121,14 @@ export type FrameFn = (dt: number, elapsed: number) => boolean | void;
 const GOVERNOR_BUDGET = 1000 / 50;
 
 /**
- * The display's frame period: the least gap over 30 animation frames, measured once, when the first
- * view is made. A 30 Hz display (or a browser held there, as on battery saver) can never give a frame
- * inside a 60 Hz budget, and every view would sit at its lowest resolution however cheap it was.
+ * The display's frame period: the least gap between animation frames, from when the first view is
+ * made. A 30 Hz display (or a browser held there, as on battery saver) can never give a frame inside a
+ * 60 Hz budget, and every view would sit at its lowest resolution however cheap it was.
+ *
+ * Taken after 30 frames, then lowered by any shorter gap over the next ten seconds or so: the first
+ * view is made while the page is busiest (models parsing, shaders linking), and a page whose first 30
+ * frames all ran at 40 ms read as a 25 Hz display, so its governor allowed 48 ms a frame and never
+ * lowered the resolution. A gap can't be shorter than the display's period, so lowering is always safe.
  */
 let framePeriod = 1000 / 60;
 let periodProbed = false;
@@ -136,8 +141,8 @@ function probeFramePeriod(): void {
   const tick = (t: number) => {
     if (last) least = Math.min(least, t - last);
     last = t;
-    if (++n < 30) requestAnimationFrame(tick);
-    else if (least > 4 && least < 100) framePeriod = least;
+    if (++n >= 30 && least > 4 && least < 100) framePeriod = least;
+    if (n < 600) requestAnimationFrame(tick);
   };
   requestAnimationFrame(tick);
 }
@@ -180,6 +185,17 @@ export class ResolutionGovernor {
     }
     return false;
   }
+}
+
+/**
+ * Is the camera gliding to a stop: moved since the last frame, but only a little (under 0.003 rad, and
+ * 0.3% of its distance from the origin)? Still is not crawling: a quaternion's angle to itself comes
+ * back as ~1e-8, not 0, so "moved" means more than float noise. Reading that noise as a crawl drew
+ * every frame of a still camera over animated content sharp, and the governor never saw them. Pure.
+ */
+export function crawling(turn: number, shift: number, distance: number): boolean {
+  const small = 0.003 * Math.max(1, distance);
+  return (turn > 1e-6 || shift > 1e-6 * Math.max(1, distance)) && turn < 0.003 && shift < small;
 }
 
 /**
@@ -378,6 +394,8 @@ export function disposeObject(root: Object3D): void {
   root.traverse((o) => {
     const mesh = o as Mesh;
     if (!isCached(mesh.geometry)) mesh.geometry?.dispose();
+    // Its per-copy matrices and colours are buffers of their own, freed only by its own dispose.
+    if ((o as Object3D & { isInstancedMesh?: boolean }).isInstancedMesh) (o as unknown as { dispose(): void }).dispose();
     // A light's shadow map: a shared context would keep it (2048² for a sun) after the scene is gone.
     (o as Object3D & { shadow?: { dispose(): void } }).shadow?.dispose();
     const mats = mesh.material ? (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) : [];
@@ -838,10 +856,7 @@ export class ThreeNode extends BaseObject {
       // that is when the eye reads detail, so draw it sharp. A still camera over animated
       // content is not a tail; it may need the reduced resolution as much as an orbit does.
       const cam = this.camera;
-      const turn = cam.quaternion.angleTo(this.lastQ);
-      const shift = cam.position.distanceTo(this.lastP);
-      const small = 0.003 * Math.max(1, cam.position.length());
-      const crawl = !this.needsShadows && (turn > 0 || shift > 0) && turn < 0.003 && shift < small;
+      const crawl = !this.needsShadows && crawling(cam.quaternion.angleTo(this.lastQ), cam.position.distanceTo(this.lastP), cam.position.length());
       this.lastQ.copy(cam.quaternion);
       this.lastP.copy(cam.position);
       const busy = this.streak >= 2 && !crawl;
