@@ -216,7 +216,14 @@ describe('scene3d validation', () => {
     bad(scene3d({ environment: { src: 'javascript:alert(1)' } }), /environment\.src must be an http\(s\) or relative URL/);
     bad(scene3d({ fog: { color: '#000', near: 10, far: 5 } }), /fog\.far must be beyond near/);
     bad(scene3d({ finish: { grain: 4 } }), /finish\.grain/);
+    bad(scene3d({ minResolution: 0.01 }), /minResolution must be a number from 0.25 to 1/);
     bad(scene3d({ objects: [{ type: 'model', src: 'a.glb', parts: { lid: { bind: { 'material.color': '1' } } } }] }), /parts\.lid\.bind\.material\.color is not bindable/);
+  });
+
+  it('takes hover as data, checked like clicks', () => {
+    expect(() => ok(scene3d({ objects: [{ type: 'sphere', radius: 1, on_hover: { set: { colour: 2 } } }] }))).not.toThrow();
+    bad(scene3d({ objects: [{ type: 'sphere', radius: 1, on_hover: { set: { nope: 1 } } }] }), /on_hover\.set\.nope must name one of scene.params/);
+    bad(scene3d({ objects: [{ type: 'sphere', radius: 1, on_hover: { set: { colour: 'red' } } }] }), /on_hover\.set\.colour must be a number/);
   });
 
   it('names the path of what is wrong', () => {

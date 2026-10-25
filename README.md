@@ -357,12 +357,12 @@ driven by the same params as the 2D nodes around it:
 | `shadows` | `soft` (default), `sharp`, `none`; `floor: { shadow, size }` or `false` |
 | `lights` | ≤ 16 of `directional`, `point`, `spot`, `ambient`, `hemisphere`; ≤ 4 cast shadows; `bind` (`intensity`, `position.*`), `visible_when` |
 | `objects` | ≤ 500 of `model`, `box` (`radius` rounds it), `sphere`, `cylinder`, `plane`, `torus`, `particles`, `group` (`merge: true` for static detail) |
-| per object | `position`, `rotation` (degrees), `scale`, `castShadow`, `receiveShadow`, `bind` (`position.*`, `rotation.*`, `scale`), `visible_when`, `on_click` |
+| per object | `position`, `rotation` (degrees), `scale`, `castShadow`, `receiveShadow`, `bind` (`position.*`, `rotation.*`, `scale`), `visible_when`, `on_click`, `on_hover` (params set while hovered, restored on leave) |
 | `model` | `src`, `fit` + `fitAxis`, `center`, `variant`, `variant_by`, `animation`; `parts: { name: { bind, visible_when, material } }` drives named nodes inside the model, `bind` as offsets from each part's rest pose |
 | `particles` | `count` (≤ 50 000 per scene), `radius`, `shape` (`disc`, `shell`), `size`, `speed`, `colors` (≤ 8): glowing points circling the y axis, moved on the GPU as a function of time, so they seek and cost no CPU per frame |
 | `bloom` | `{ strength, radius, threshold }`: glow, as below; the code loads only when set |
 | `material` | `color`, `color_by`, `roughness`, `metalness`, `emissive`, `emissiveIntensity`, `opacity`, `clearcoat`, `transmission`, `flatShading`, `side` |
-| `quality`, `layer`, `render` | `auto`/`high`/`low`; `overlay`/`inline`; `demand`/`always` (see below) |
+| `quality`, `layer`, `render` | `auto`/`high`/`low`; `overlay`/`inline`; `demand`/`always` (see below); `minResolution` (0.25–1) |
 
 Model URLs pass through `parseScene(spec, mount, { resolveAsset })`; without
 one, only same-origin and relative URLs load, so a spec from a stranger can't

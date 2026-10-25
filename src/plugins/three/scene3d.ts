@@ -101,6 +101,9 @@ export class Scene3DNode extends ThreeNode {
   private readonly colours: Array<{ mat: MeshStandardMaterial; param: string; palette: Color[] }> = [];
   private readonly variants: Array<{ root: Object3D; gltf: GLTF; param: string; names: string[]; current: string }> = [];
   private readonly clickables = new Map<Object3D, Record<string, number>>();
+  private readonly hoverables = new Map<Object3D, Record<string, number>>();
+  /** The object under the pointer that has `on_hover`, and the param values to put back when it leaves. */
+  private hovered: { obj: Object3D; restore: Record<string, number> } | null = null;
   /** Objects something drives (bind, visible_when, on_click, color_by): never merged away. */
   private readonly dynamic = new Set<Object3D>();
   private readonly mixers: AnimationMixer[] = [];
@@ -108,7 +111,8 @@ export class Scene3DNode extends ThreeNode {
   private readonly clouds: Array<{ value: number }> = [];
   private timed3d = false;
   private seen = -1;
-  private hover: { x: number; y: number } | null = null;
+  /** The pointer's last position, to pick once per frame; 'out' when it left the canvas. */
+  private hover: { x: number; y: number } | 'out' | null = null;
   /** Camera axes set by `camera.bind`, by key; they override the spec and the path. */
   private readonly camBound: Record<string, number> = {};
   private flight: { points: CatmullRomCurve3; look: CatmullRomCurve3 | null; at: number } | null = null;
@@ -195,7 +199,7 @@ export class Scene3DNode extends ThreeNode {
     }
 
     this.onFrame((dt, elapsed) => this.drive(dt, elapsed));
-    if (this.clickables.size) this.wireClicks();
+    if (this.clickables.size || this.hoverables.size) this.wireClicks();
   }
 
   /* ------------------------------------------------------------- building */
@@ -452,7 +456,8 @@ export class Scene3DNode extends ThreeNode {
       return 'world';
     });
     if (o.on_click) this.clickables.set(obj, o.on_click.set);
-    const driven = o.bind || o.visible_when || o.on_click || ('material' in o && o.material?.color_by);
+    if (o.on_hover) this.hoverables.set(obj, o.on_hover.set);
+    const driven = o.bind || o.visible_when || o.on_click || o.on_hover || ('material' in o && o.material?.color_by);
     if (driven) this.dynamic.add(obj);
     return obj;
   }
@@ -645,17 +650,31 @@ export class Scene3DNode extends ThreeNode {
       view = true;
     }
     if (this.hover) {
-      this.canvas.style.cursor = this.clickTarget(this.hover.x, this.hover.y) ? 'pointer' : '';
+      const at = this.hover === 'out' ? null : this.hover;
       this.hover = null;
+      this.canvas.style.cursor = at && this.owner(this.clickables, at.x, at.y) ? 'pointer' : '';
+      const over = at ? this.owner(this.hoverables, at.x, at.y) : null;
+      if (over !== (this.hovered?.obj ?? null)) {
+        const params = this.scene?.params;
+        if (this.hovered) for (const [name, v] of Object.entries(this.hovered.restore)) params?.set(name, v);
+        this.hovered = null;
+        if (over && params) {
+          const set = this.hoverables.get(over)!;
+          this.hovered = { obj: over, restore: Object.fromEntries(Object.keys(set).map((n) => [n, params.get(n)])) };
+          for (const [name, v] of Object.entries(set)) params.set(name, v);
+        }
+      }
     }
     if (view) this.invalidate('view');
     return world;
   }
 
-  private clickTarget(x: number, y: number): Record<string, number> | null {
-    let o: Object3D | null = this.pick(x, y, [...this.clickables.keys()])?.object ?? null;
-    while (o && !this.clickables.has(o)) o = o.parent;
-    return o ? this.clickables.get(o)! : null;
+  /** The object in `map` under the pointer: the nearest hit mesh, or the first ancestor of it in the map. */
+  private owner(map: Map<Object3D, unknown>, x: number, y: number): Object3D | null {
+    if (!map.size) return null;
+    let o: Object3D | null = this.pick(x, y, [...map.keys()])?.object ?? null;
+    while (o && !map.has(o)) o = o.parent;
+    return o;
   }
 
   private wireClicks(): void {
@@ -665,18 +684,21 @@ export class Scene3DNode extends ThreeNode {
     const pu = (e: PointerEvent) => {
       // A click, not the end of an orbit drag.
       if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 5) return;
-      const set = this.clickTarget(e.clientX, e.clientY);
-      if (set) for (const [name, v] of Object.entries(set)) this.scene?.params.set(name, v);
+      const o = this.owner(this.clickables, e.clientX, e.clientY);
+      if (o) for (const [name, v] of Object.entries(this.clickables.get(o)!)) this.scene?.params.set(name, v);
     };
     // Hover is only recorded here; the pick runs once per frame at most, in `drive`.
     const pm = (e: PointerEvent) => (this.hover = { x: e.clientX, y: e.clientY });
+    const pl = () => (this.hover = 'out');
     canvas.addEventListener('pointerdown', pd);
     canvas.addEventListener('pointerup', pu);
     canvas.addEventListener('pointermove', pm);
+    canvas.addEventListener('pointerleave', pl);
     this.onCleanup(() => {
       canvas.removeEventListener('pointerdown', pd);
       canvas.removeEventListener('pointerup', pu);
       canvas.removeEventListener('pointermove', pm);
+      canvas.removeEventListener('pointerleave', pl);
     });
   }
 }

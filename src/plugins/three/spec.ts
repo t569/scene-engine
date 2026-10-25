@@ -43,6 +43,8 @@ interface Object3DBase {
   visible_when?: VisibleWhen | VisibleWhen[];
   /** Clicking the object sets params, like 2D `on_click`. */
   on_click?: { set: Record<string, number> };
+  /** While the pointer is over the object these params take these values; on leave they go back. */
+  on_hover?: { set: Record<string, number> };
 }
 
 export interface ModelObject extends Object3DBase {
@@ -200,6 +202,8 @@ export interface Scene3DSpec extends BaseNodeSpec {
   /** An invisible floor that shows only shadows. `false` for none. */
   floor?: false | { shadow?: number; size?: number };
   quality?: Quality;
+  /** The lowest resolution `auto` may drop to while things move, real pixels per CSS pixel. Default 0.75. */
+  minResolution?: number;
   layer?: 'overlay' | 'inline';
   render?: 'demand' | 'always';
   lights?: Light3D[];
@@ -350,6 +354,7 @@ export function validateScene3D(node: Record<string, unknown>, at: string, ctx: 
   color(node.background, `${at}.background`);
   oneOf(node.shadows, `${at}.shadows`, ['soft', 'sharp', 'none']);
   oneOf(node.quality, `${at}.quality`, ['auto', 'high', 'low']);
+  range(node.minResolution, `${at}.minResolution`, 0.25, 1);
   oneOf(node.layer, `${at}.layer`, ['overlay', 'inline']);
   oneOf(node.render, `${at}.render`, ['demand', 'always']);
   if (node.bloom !== undefined) {
@@ -432,11 +437,13 @@ export function validateScene3D(node: Record<string, unknown>, at: string, ctx: 
     bool(ob.receiveShadow, `${w}.receiveShadow`);
     binds(ob.bind, `${w}.bind`, OBJECT_BIND_KEYS);
     conditions(ob.visible_when, `${w}.visible_when`);
-    if (ob.on_click !== undefined) {
-      if (!isRecord(ob.on_click) || !isRecord((ob.on_click as Record<string, unknown>).set)) fail(`${w}.on_click must be { set: { param: value } }`);
-      for (const [p, v] of Object.entries((ob.on_click as { set: Record<string, unknown> }).set)) {
-        ctx.checkParamRef(p, `${w}.on_click.set.${p}`);
-        if (!num(v)) fail(`${w}.on_click.set.${p} must be a number`);
+    for (const key of ['on_click', 'on_hover'] as const) {
+      const on = ob[key];
+      if (on === undefined) continue;
+      if (!isRecord(on) || !isRecord(on.set)) fail(`${w}.${key} must be { set: { param: value } }`);
+      for (const [p, v] of Object.entries((on as { set: Record<string, unknown> }).set)) {
+        ctx.checkParamRef(p, `${w}.${key}.set.${p}`);
+        if (!num(v)) fail(`${w}.${key}.set.${p} must be a number`);
       }
     }
     switch (ob.type) {

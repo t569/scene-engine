@@ -10,6 +10,8 @@
 - `view.addPass(pass)`: a three.js pass into the view's composer, after bloom, before tone mapping.
   `ThreeOptions.finish` and `exposure` as for scene3d.
 - Expressions: `smoothstep(e0, e1, x)`.
+- scene3d: `on_hover: { set }` on objects (params take the values while the pointer is over it, and go
+  back when it leaves); `minResolution`, as on ThreeNode, for heavy views on integrated GPUs.
 - Fix: bloom views drop to their `minResolution`. A composer's scale snapped to 0.7 or 0.5 whatever the
   floor, so a heavy bloom scene (a ray-marched black hole on a phone) couldn't shed the cost the governor
   asked it to. Levels now go 0.7, 0.5, 0.35, 0.25.
