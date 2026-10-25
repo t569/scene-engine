@@ -27,12 +27,14 @@ export {
   type ThreeOptions,
 } from './three/node.ts';
 export { Scene3DNode } from './three/scene3d.ts';
+export { FinishShader, type FinishOptions } from './three/finish.ts';
 export {
   LIMITS_3D,
   validateScene3D,
   type Light3D,
   type Material3D,
   type Object3DSpec,
+  type PartSpec,
   type Scene3DSpec,
   type Vec3,
 } from './three/spec.ts';

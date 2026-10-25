@@ -66,6 +66,11 @@ const FUNCTIONS = new Map<string, { arity: number | 'any'; fn: (...a: number[]) 
   ['mod', { arity: 2, fn: (a, b) => ((a % b) + b) % b }],
   ['clamp', { arity: 3, fn: (v, lo, hi) => Math.min(hi, Math.max(lo, v)) }],
   ['lerp', { arity: 3, fn: (a, b, t) => a + (b - a) * t }],
+  // GLSL's: 0 below e0, 1 above e1, eased between. What scroll choreography is written in.
+  ['smoothstep', { arity: 3, fn: (e0, e1, x) => {
+    const u = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
+    return u * u * (3 - 2 * u);
+  } }],
   ['min', { arity: 'any', fn: Math.min }],
   ['max', { arity: 'any', fn: Math.max }],
   ['hypot', { arity: 'any', fn: Math.hypot }],

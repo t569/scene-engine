@@ -47,6 +47,8 @@ import {
 } from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
+import type { Pass } from 'three/addons/postprocessing/Pass.js';
+import { FinishShader, type FinishOptions } from './finish.ts';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { BufferGeometry } from 'three';
 import { BaseObject } from '../../objects.ts';
@@ -88,6 +90,10 @@ export interface ThreeOptions extends BaseNodeSpec {
    * frames draw plainly. `threshold` is the luminance (0–1) above which things glow.
    */
   bloom?: { strength?: number; radius?: number; threshold?: number };
+  /** Film grain, vignette and colour fringes, after tone mapping, in one pass. Loads like bloom. */
+  finish?: FinishOptions;
+  /** Tone mapping exposure (ACES filmic). Default 1. */
+  exposure?: number;
 }
 
 /** The part of three's EffectComposer this node uses. */
@@ -99,6 +105,8 @@ interface Composer {
   setSize(w: number, h: number): void;
   dispose(): void;
 }
+type EffectComposer = import('three/addons/postprocessing/EffectComposer.js').EffectComposer;
+type ShaderPass = import('three/addons/postprocessing/ShaderPass.js').ShaderPass;
 
 export type FrameFn = (dt: number, elapsed: number) => boolean | void;
 
@@ -467,8 +475,12 @@ export class ThreeNode extends BaseObject {
   private backdrop: HTMLDivElement | null = null;
   private backdropAt = '';
   private composer: Composer | null = null;
+  private composing: Promise<void> | null = null;
+  private fx: { composer: EffectComposer; output: Pass; finish: ShaderPass | null } | null = null;
+  /** Host passes (`addPass`), drawn in linear light between the scene (and bloom) and tone mapping. */
+  private readonly extra: Pass[] = [];
   /** Set on destroy: an import that lands afterwards must not touch the lost context. */
-  private destroyed = false;
+  protected destroyed = false;
   /** Shared mode: where frames are drawn, when there is no composer. */
   private readonly target: WebGLRenderTarget | null = null;
   /** The texture the last frame went into: the target's, or the composer's once bloom has arrived. */
@@ -544,7 +556,7 @@ export class ThreeNode extends BaseObject {
     const floor = opts.minResolution ?? 0.75;
     this.governor = new ResolutionGovernor(Math.min(1, Math.max(opts.minResolution ? 0.1 : 0.5, floor / this.baseRatio())));
     probeFramePeriod();
-    if (opts.bloom && !ThreeNode.noBloom) void this.loadBloom(opts.bloom);
+    if ((opts.bloom && !ThreeNode.noBloom) || opts.finish) void this.loadComposer();
   }
 
   /** Renderer settings. Shared mode sets them again before each frame: the other nodes have theirs. */
@@ -555,6 +567,7 @@ export class ThreeNode extends BaseObject {
     r.autoClear = true;
     r.outputColorSpace = SRGBColorSpace;
     r.toneMapping = ACESFilmicToneMapping;
+    r.toneMappingExposure = this.opts.exposure ?? 1;
     r.setClearColor(...this.clear);
     r.shadowMap.enabled = this.shadowMode !== 'none';
     r.shadowMap.type = this.shadowMode === 'soft' ? VSMShadowMap : PCFShadowMap;
@@ -609,22 +622,55 @@ export class ThreeNode extends BaseObject {
     return done.then(upload, () => {}).finally(() => plain?.dispose());
   }
 
-  private async loadBloom({ strength = 0.8, radius = 0.4, threshold = 0.6 }: NonNullable<ThreeOptions['bloom']>): Promise<void> {
-    const [{ EffectComposer }, { RenderPass }, { UnrealBloomPass }, { OutputPass }] = await Promise.all([
+  /**
+   * Add a post-processing pass (three's `Pass`): it runs on the scene in linear light, after bloom
+   * and before tone mapping and the finish. The composer code loads on the first call, as for bloom;
+   * frames draw plainly until it arrives. The node disposes the pass with itself.
+   */
+  addPass(pass: Pass): void {
+    this.extra.push(pass);
+    const fx = this.fx;
+    if (fx) fx.composer.insertPass(pass, fx.composer.passes.indexOf(fx.output));
+    else void this.loadComposer();
+    this.invalidate('view');
+  }
+
+  private loadComposer(): Promise<void> {
+    return (this.composing ??= this.buildComposer());
+  }
+
+  private async buildComposer(): Promise<void> {
+    const bloomOpts = ThreeNode.noBloom ? undefined : this.opts.bloom;
+    const [{ EffectComposer }, { RenderPass }, { OutputPass }, bloomMod, shaderMod] = await Promise.all([
       import('three/addons/postprocessing/EffectComposer.js'),
       import('three/addons/postprocessing/RenderPass.js'),
-      import('three/addons/postprocessing/UnrealBloomPass.js'),
       import('three/addons/postprocessing/OutputPass.js'),
+      bloomOpts ? import('three/addons/postprocessing/UnrealBloomPass.js') : null,
+      this.opts.finish ? import('three/addons/postprocessing/ShaderPass.js') : null,
     ]);
     if (this.destroyed) return;
     // Multisampled, like the plain path's target: the default composer target has none, so every
     // bloom scene lost its antialiasing (worst on thin lines at reduced resolution).
     const composer = new EffectComposer(this.renderer, new WebGLRenderTarget(1, 1, { type: HalfFloatType, samples: 4 }));
     composer.renderToScreen = !this.target;
-    const bloom = new UnrealBloomPass(new Vector2(1, 1), strength, radius, threshold);
     composer.addPass(new RenderPass(this.world, this.camera));
-    composer.addPass(bloom);
-    composer.addPass(new OutputPass()); // tone mapping and sRGB happen here, after the glow
+    if (bloomMod && bloomOpts) {
+      const { strength = 0.8, radius = 0.4, threshold = 0.6 } = bloomOpts;
+      composer.addPass(new bloomMod.UnrealBloomPass(new Vector2(1, 1), strength, radius, threshold));
+    }
+    for (const p of this.extra) composer.addPass(p);
+    const output = new OutputPass(); // tone mapping and sRGB happen here, after the glow
+    composer.addPass(output);
+    let finish: ShaderPass | null = null;
+    if (shaderMod && this.opts.finish) {
+      finish = new shaderMod.ShaderPass(FinishShader);
+      const { grain = 0, vignette = 0, aberration = 0 } = this.opts.finish;
+      finish.uniforms.uGrain!.value = grain;
+      finish.uniforms.uVignette!.value = vignette;
+      finish.uniforms.uAberration!.value = aberration;
+      composer.addPass(finish);
+    }
+    this.fx = { composer, output, finish };
     this.composer = {
       render: () => composer.render(),
       get texture() {
@@ -633,7 +679,7 @@ export class ThreeNode extends BaseObject {
       setPixelRatio: (r) => composer.setPixelRatio(r),
       setSize: (w, h) => composer.setSize(w, h),
       dispose: () => {
-        bloom.dispose();
+        for (const p of composer.passes) p.dispose();
         composer.dispose();
       },
     };
@@ -833,6 +879,11 @@ export class ThreeNode extends BaseObject {
     const t = this.timer;
     const q = t && t.queries.length < 4 ? t.gl.createQuery() : null;
     if (q) t!.gl.beginQuery(t!.ext.TIME_ELAPSED_EXT, q);
+    const finish = this.fx?.finish;
+    if (finish) {
+      finish.uniforms.uTime!.value = this.scene?.elapsed ?? 0;
+      finish.uniforms.uResolution!.value = [Math.max(1, this.cssSize.w * this.ratio), Math.max(1, this.cssSize.h * this.ratio)];
+    }
     if (this.composer) this.composer.render();
     else this.renderer.render(this.world, this.camera);
     if (this.target) {
@@ -979,7 +1030,8 @@ export class ThreeNode extends BaseObject {
     this.frames.clear();
     this.observer?.disconnect();
     this.orbitControls?.dispose();
-    this.composer?.dispose();
+    if (this.composer) this.composer.dispose();
+    else for (const p of this.extra) p.dispose(); // the composer never arrived to own them
     disposeObject(this.world);
     this.world.environment?.dispose();
     if (this.target) {

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- scene3d, cinematic: `camera.path` (a flight on a curve at `along`, an expression; point k of n at
+  `along = k / (n - 1)`) and `camera.bind`, so a scroll-driven camera is data and seeks; `environment.src`
+  (an .hdr, with `background`, `blur`, `rotation`); `fog`; `exposure`; `finish` (grain, vignette, colour
+  fringes, one pass after tone mapping); `model.parts` to drive named nodes inside a glTF, as offsets
+  from their rest pose, with their own `material` (a livery from a param).
+- `view.addPass(pass)`: a three.js pass into the view's composer, after bloom, before tone mapping.
+  `ThreeOptions.finish` and `exposure` as for scene3d.
+- Expressions: `smoothstep(e0, e1, x)`.
 - Fix: bloom views drop to their `minResolution`. A composer's scale snapped to 0.7 or 0.5 whatever the
   floor, so a heavy bloom scene (a ray-marched black hole on a phone) couldn't shed the cost the governor
   asked it to. Levels now go 0.7, 0.5, 0.35, 0.25.

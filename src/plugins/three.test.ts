@@ -199,6 +199,26 @@ describe('scene3d validation', () => {
     bad(scene3d({ objects: [{ ...cloud, colors: ['url(javascript:1)'] }] }), /colors\[0\]/);
   });
 
+  it('takes a cinematic scene as data: flight path, camera binds, HDRI, fog, finish, model parts', () => {
+    const film = scene3d({
+      camera: { fov: 30, path: { points: [[0, 1, 6], [4, 1, 0], [0, 2, -6]], target: [[0, 0, 0], [0, 0.5, 0]], along: 'smoothstep(0, 1, spin)' }, bind: { fov: '30 + 10 * spin' } },
+      environment: { src: 'hdri/studio.hdr', background: true, blur: 0.4, rotation: 90, intensity: 0.8 },
+      fog: { color: '#05050a', near: 4, far: 30 },
+      exposure: 1.2,
+      finish: { grain: 0.3, vignette: 0.5, aberration: 3 },
+      objects: [{ type: 'model', src: 'models/car.glb', parts: { 'wheel FL': { bind: { 'rotation.x': '720 * t' } }, body: { material: { color_by: { param: 'colour', palette: ['#f00', '#00f'] } } } } }],
+    });
+    expect(() => ok(film)).not.toThrow();
+    bad(scene3d({ camera: { path: { points: [[0, 0, 0]], along: 'spin' } } }), /path\.points must be a list of 2 to 64/);
+    bad(scene3d({ camera: { path: { points: [[0, 0, 0], [1, 1]], along: 'spin' } } }), /path\.points\[1\] must be \[x, y, z\]/);
+    bad(scene3d({ camera: { path: { points: [[0, 0, 0], [1, 1, 1]], along: 'fetch(1)' } } }), /unknown function/);
+    bad(scene3d({ camera: { bind: { roll: 'spin' } } }), /camera\.bind\.roll is not bindable/);
+    bad(scene3d({ environment: { src: 'javascript:alert(1)' } }), /environment\.src must be an http\(s\) or relative URL/);
+    bad(scene3d({ fog: { color: '#000', near: 10, far: 5 } }), /fog\.far must be beyond near/);
+    bad(scene3d({ finish: { grain: 4 } }), /finish\.grain/);
+    bad(scene3d({ objects: [{ type: 'model', src: 'a.glb', parts: { lid: { bind: { 'material.color': '1' } } } }] }), /parts\.lid\.bind\.material\.color is not bindable/);
+  });
+
   it('names the path of what is wrong', () => {
     bad(scene3d({ objects: [{ type: 'box', size: [1, 1, 1], bind: { 'material.color': 'colour' } }] }), /objects\[0\]\.objects\[0\]\.bind\.material\.color is not bindable/);
     bad(scene3d({ objects: [{ type: 'box', size: [1, 1, 1], material: { color_by: { param: 'nope', palette: ['#fff'] } } }] }), /color_by\.param must name one of scene.params/);

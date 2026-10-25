@@ -24,6 +24,7 @@ describe('expressions', () => {
     expect(run('sin(pi / 2)')).toBeCloseTo(1, 12);
     expect(run('max(1, a, 3)', { a: 5 })).toBe(5);
     expect(run('clamp(a, 0, 1)', { a: 4 })).toBe(1);
+    expect([run('smoothstep(0, 2, a)', { a: -1 }), run('smoothstep(0, 2, a)', { a: 1 }), run('smoothstep(0, 2, a)', { a: 3 })]).toEqual([0, 0.5, 1]);
     expect(run('1.5e2')).toBe(150);
   });
 

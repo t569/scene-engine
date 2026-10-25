@@ -60,6 +60,18 @@ export interface ModelObject extends Object3DBase {
   variant_by?: { param: string; variants: string[] };
   /** Play an animation clip (by name), or the first one with `true`. */
   animation?: string | boolean;
+  /**
+   * Drive named nodes inside the model (a wheel, a lid's hinge, a phone's layers). `bind` values are
+   * offsets from the part's own rest pose, so `"position.y": "explode * 0.4"` lifts a layer from where
+   * the artist left it. `material` replaces the part's materials (a livery colour from a param).
+   */
+  parts?: Record<string, PartSpec>;
+}
+
+export interface PartSpec {
+  bind?: Partial<Record<ObjectBindKey, string>>;
+  visible_when?: VisibleWhen | VisibleWhen[];
+  material?: Material3D;
 }
 
 export interface BoxObject extends Object3DBase {
@@ -151,13 +163,35 @@ export interface Scene3DSpec extends BaseNodeSpec {
   type: 'scene3d';
   width: number;
   height: number;
-  camera?: { position?: Vec3; target?: Vec3; fov?: number };
+  camera?: {
+    position?: Vec3;
+    target?: Vec3;
+    fov?: number;
+    /** From expressions, e.g. a `scroll` param the host sets: `position.*`, `target.*`, `fov`. */
+    bind?: Partial<Record<CameraBindKey, string>>;
+    /**
+     * A flight: the camera rides a smooth curve through `points`, at `along` (an expression, 0–1),
+     * looking along `target` (a curve too) or at `camera.target`. Point k of n is reached at
+     * `along = k / (n - 1)`, however far apart the points are. Binds apply on top. Turns `orbit` off.
+     */
+    path?: { points: Vec3[]; target?: Vec3[]; along: string };
+  };
   /** Drag to orbit (default true), or the details. Angles in degrees. */
   orbit?:
     | boolean
     | { autoRotate?: number; minDistance?: number; maxDistance?: number; minPolarAngle?: number; maxPolarAngle?: number; pan?: boolean; zoom?: boolean };
-  /** Soft studio lighting from an environment map. Default `studio`, intensity 1. */
-  environment?: { preset?: 'studio' | 'none'; intensity?: number };
+  /**
+   * Soft studio lighting from an environment map. Default `studio`, intensity 1. `src`: an
+   * equirectangular .hdr instead (loaded through `resolveAsset`; the preset lights until it lands);
+   * `background` shows it behind the scene, softened by `blur` (0–1); `rotation` turns it, degrees.
+   */
+  environment?: { preset?: 'studio' | 'none'; src?: string; intensity?: number; background?: boolean; blur?: number; rotation?: number };
+  /** Distance fog: things fade into `color` from `near` to `far`. */
+  fog?: { color: string; near?: number; far: number };
+  /** Tone mapping exposure. Default 1. */
+  exposure?: number;
+  /** Grain, vignette and colour fringes after tone mapping; see `ThreeOptions.finish`. */
+  finish?: { grain?: number; vignette?: number; aberration?: number };
   /** Clear colour behind the 3D content. Default transparent. */
   background?: string;
   shadows?: ShadowMode;
@@ -180,6 +214,8 @@ declare module '../../types.js' {
 
 export const OBJECT_BIND_KEYS = ['position.x', 'position.y', 'position.z', 'rotation.x', 'rotation.y', 'rotation.z', 'scale'] as const;
 export const LIGHT_BIND_KEYS = ['intensity', 'position.x', 'position.y', 'position.z'] as const;
+export const CAMERA_BIND_KEYS = ['position.x', 'position.y', 'position.z', 'target.x', 'target.y', 'target.z', 'fov'] as const;
+export type CameraBindKey = (typeof CAMERA_BIND_KEYS)[number];
 export type ObjectBindKey = (typeof OBJECT_BIND_KEYS)[number];
 export type LightBindKey = (typeof LIGHT_BIND_KEYS)[number];
 
@@ -195,6 +231,10 @@ export const LIMITS_3D = {
   /** Points across all `particles` objects in one scene. */
   particles: 50_000,
   particleColors: 8,
+  /** Points on a camera path (and on its target path). */
+  pathPoints: 64,
+  /** Named parts driven on one model. */
+  parts: 64,
 } as const;
 
 /* -------------------------------------------------------------- validation */
@@ -217,6 +257,11 @@ export function validateScene3D(node: Record<string, unknown>, at: string, ctx: 
     if (v !== undefined && typeof v !== 'boolean') fail(`${where} must be true or false`);
   };
   const color = (v: unknown, where: string) => v !== undefined && ctx.checkColor(v, where);
+  const url = (v: unknown, where: string) => {
+    if (typeof v !== 'string' || v.length === 0 || v.length > LIMITS_3D.srcLength) fail(`${where} must be a URL up to ${LIMITS_3D.srcLength} characters`);
+    // Only web URLs and relative paths: no javascript:, data:, blob:, file:.
+    if (/^\s*[a-z][a-z0-9+.-]*:/i.test(v as string) && !/^https?:\/\//i.test(v as string)) fail(`${where} must be an http(s) or relative URL`);
+  };
   const conditions = (v: unknown, where: string) => {
     if (v === undefined) return;
     const list = Array.isArray(v) ? v : [v];
@@ -249,6 +294,20 @@ export function validateScene3D(node: Record<string, unknown>, at: string, ctx: 
     vec3(cam.position, `${at}.camera.position`);
     vec3(cam.target, `${at}.camera.target`);
     range(cam.fov, `${at}.camera.fov`, 1, 170);
+    binds(cam.bind, `${at}.camera.bind`, CAMERA_BIND_KEYS);
+    if (cam.path !== undefined) {
+      if (!isRecord(cam.path)) fail(`${at}.camera.path must be { points, target?, along }`);
+      const path = cam.path as Record<string, unknown>;
+      const points = (v: unknown, w: string) => {
+        if (!Array.isArray(v) || v.length < 2 || v.length > LIMITS_3D.pathPoints) fail(`${w} must be a list of 2 to ${LIMITS_3D.pathPoints} points`);
+        (v as unknown[]).forEach((p, i) => {
+          if (!(Array.isArray(p) && p.length === 3 && p.every(num))) fail(`${w}[${i}] must be [x, y, z]`);
+        });
+      };
+      points(path.points, `${at}.camera.path.points`);
+      if (path.target !== undefined) points(path.target, `${at}.camera.path.target`);
+      ctx.checkExpr(path.along, `${at}.camera.path.along`);
+    }
   }
   if (node.orbit !== undefined && typeof node.orbit !== 'boolean') {
     if (!isRecord(node.orbit)) fail(`${at}.orbit must be true, false or an object`);
@@ -266,6 +325,27 @@ export function validateScene3D(node: Record<string, unknown>, at: string, ctx: 
     const e = node.environment as Record<string, unknown>;
     oneOf(e.preset, `${at}.environment.preset`, ['studio', 'none']);
     range(e.intensity, `${at}.environment.intensity`, 0, 10);
+    if (e.src !== undefined) url(e.src, `${at}.environment.src`);
+    bool(e.background, `${at}.environment.background`);
+    range(e.blur, `${at}.environment.blur`, 0, 1);
+    range(e.rotation, `${at}.environment.rotation`, -360, 360);
+  }
+  if (node.fog !== undefined) {
+    if (!isRecord(node.fog)) fail(`${at}.fog must be { color, near?, far }`);
+    const f = node.fog as Record<string, unknown>;
+    if (f.color === undefined) fail(`${at}.fog.color is required`);
+    color(f.color, `${at}.fog.color`);
+    range(f.near, `${at}.fog.near`, 0, 1e4);
+    range(f.far, `${at}.fog.far`, 0, 1e4);
+    if (!num(f.far) || f.far <= ((f.near as number | undefined) ?? 0)) fail(`${at}.fog.far must be beyond near`);
+  }
+  range(node.exposure, `${at}.exposure`, 0, 10);
+  if (node.finish !== undefined) {
+    if (!isRecord(node.finish)) fail(`${at}.finish must be { grain?, vignette?, aberration? }`);
+    const f = node.finish as Record<string, unknown>;
+    range(f.grain, `${at}.finish.grain`, 0, 1);
+    range(f.vignette, `${at}.finish.vignette`, 0, 1);
+    range(f.aberration, `${at}.finish.aberration`, 0, 20);
   }
   color(node.background, `${at}.background`);
   oneOf(node.shadows, `${at}.shadows`, ['soft', 'sharp', 'none']);
@@ -361,9 +441,7 @@ export function validateScene3D(node: Record<string, unknown>, at: string, ctx: 
     }
     switch (ob.type) {
       case 'model': {
-        if (typeof ob.src !== 'string' || ob.src.length === 0 || ob.src.length > LIMITS_3D.srcLength) fail(`${w}.src must be a URL up to ${LIMITS_3D.srcLength} characters`);
-        // Only web URLs and relative paths: no javascript:, data:, blob:, file:.
-        if (/^\s*[a-z][a-z0-9+.-]*:/i.test(ob.src as string) && !/^https?:\/\//i.test(ob.src as string)) fail(`${w}.src must be an http(s) or relative URL`);
+        url(ob.src, `${w}.src`);
         if (ob.fit !== undefined) positive(ob.fit, `${w}.fit`);
         oneOf(ob.fitAxis, `${w}.fitAxis`, ['max', 'width', 'height', 'depth']);
         bool(ob.center, `${w}.center`);
@@ -376,6 +454,18 @@ export function validateScene3D(node: Record<string, unknown>, at: string, ctx: 
           palette(vb.variants, `${w}.variant_by.variants`, LIMITS_3D.variants, (x, vw) => {
             if (typeof x !== 'string' || x.length > 128) fail(`${vw} must be a variant name`);
           });
+        }
+        if (ob.parts !== undefined) {
+          if (!isRecord(ob.parts) || Object.keys(ob.parts).length > LIMITS_3D.parts) fail(`${w}.parts must be an object of at most ${LIMITS_3D.parts} parts`);
+          for (const [name, part] of Object.entries(ob.parts as Record<string, unknown>)) {
+            const pw = `${w}.parts.${name}`;
+            if (name.length > 128) fail(`${pw}: part names are at most 128 characters`);
+            if (!isRecord(part)) fail(`${pw} must be { bind?, visible_when?, material? }`);
+            const pt = part as Record<string, unknown>;
+            binds(pt.bind, `${pw}.bind`, OBJECT_BIND_KEYS);
+            conditions(pt.visible_when, `${pw}.visible_when`);
+            material(pt.material, `${pw}.material`);
+          }
         }
         return;
       }
