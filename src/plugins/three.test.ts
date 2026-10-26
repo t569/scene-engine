@@ -13,12 +13,29 @@ describe('ResolutionGovernor', () => {
     return changed;
   };
 
+  // A GPU-bound frame: its cost goes with the pixels, the scale squared.
+  const gpu = (g: ResolutionGovernor, full: number, n: number) => {
+    for (let i = 0; i < n; i++) g.sample(full * g.scale ** 2);
+  };
+
   it('lowers the scale when frames come back slow, to a floor', () => {
+    const g = new ResolutionGovernor(0.7);
+    gpu(g, 55, 20);
+    expect(g.scale).toBe(0.8);
+    gpu(g, 55, 200);
+    expect(g.scale).toBe(0.7); // 0.64 would fit; the floor holds it
+  });
+
+  it('undoes a drop that did not speed frames up: the main thread, not the pixels', () => {
     const g = new ResolutionGovernor(0.5);
     feed(g, 33, 20);
     expect(g.scale).toBe(0.8);
+    feed(g, 33, 20); // the same 33 ms at fewer pixels
+    expect(g.scale).toBe(1);
     feed(g, 33, 200);
-    expect(g.scale).toBe(0.5);
+    expect(g.scale).toBe(1); // not tried again
+    feed(g, 50, 20); // slower by more than a third: something changed, worth a try
+    expect(g.scale).toBe(0.8);
   });
 
   it('holds at vsync, and wants more evidence to rise again after a drop', () => {

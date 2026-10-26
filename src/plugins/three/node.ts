@@ -152,6 +152,10 @@ export class ResolutionGovernor {
   private window: number[] = [];
   private good = 0;
   private need = 3;
+  /** The last drop: the scale before it and the frame time that asked for it, until the next window judges it. */
+  private dropped: { from: number; avg: number } | null = null;
+  /** Frames this slow are not the pixels' doing (a drop didn't speed them up): no lowering until they get slower. */
+  private blindBelow = 0;
 
   constructor(
     readonly min = 0.5,
@@ -169,7 +173,19 @@ export class ResolutionGovernor {
     const far = this.window.length >= 3 && avg > this.budget * 3;
     if (this.window.length < this.size && !far) return false;
     this.window.length = 0;
-    if (avg > this.budget * 1.15 && this.scale > this.min) {
+    // A drop that bought under 10% was not the GPU's to give: the frames wait on the main thread (a
+    // phone's CPU) or the browser. Without a GPU timer (Android) the gap is all there is, and it can't
+    // tell the two apart, so it was tried. Undone, and not tried again until frames slow by a third.
+    // ponytail: one probe per slowdown; a vsync step can hide a drop that would have helped two steps down.
+    const last = this.dropped;
+    this.dropped = null;
+    if (last && avg > last.avg * 0.9) {
+      this.scale = last.from;
+      this.blindBelow = last.avg * 1.3;
+      return true;
+    }
+    if (avg > this.budget * 1.15 && avg >= this.blindBelow && this.scale > this.min) {
+      this.dropped = { from: this.scale, avg };
       // Cost goes with the pixel count, the scale squared: far over, straight to where it would fit.
       const fit = far ? Math.min(0.8, Math.sqrt(this.budget / avg)) : 0.8;
       this.scale = Math.max(this.min, Math.round(this.scale * fit * 100) / 100);
